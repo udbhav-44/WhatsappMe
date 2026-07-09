@@ -29,8 +29,22 @@ function canDeleteUser(requesterId, targetId) {
   return { ok: true };
 }
 
-// In-memory rate limiter for login attempts
-const loginAttempts = {}; // { userId: { count, lockedUntil } }
+// Pure decision for a login attempt, given the user's persisted lockout state.
+// Returns the response + the new (failedAttempts, lockedUntil) to persist.
+// 5 wrong PINs → 30-minute lock; a correct PIN resets both.
+function loginOutcome({ lockedUntil, failedAttempts, pinMatches, now, maxAttempts = 5, lockoutMs = 30 * 60 * 1000 }) {
+  if (lockedUntil > now) {
+    return { status: 429, error: 'Too many attempts. Try again later.', failedAttempts, lockedUntil };
+  }
+  if (pinMatches) {
+    return { ok: true, status: 200, failedAttempts: 0, lockedUntil: 0 };
+  }
+  const nextFailed = (failedAttempts || 0) + 1;
+  if (nextFailed >= maxAttempts) {
+    return { status: 401, error: 'Invalid PIN', failedAttempts: 0, lockedUntil: now + lockoutMs };
+  }
+  return { status: 401, error: 'Invalid PIN', failedAttempts: nextFailed, lockedUntil: 0 };
+}
 
 // POST /api/auth/login
 router.post('/login', loginLimiter, (req, res) => {
@@ -41,36 +55,31 @@ router.post('/login', loginLimiter, (req, res) => {
     return res.status(400).json({ error: 'userId and pin are required' });
   }
 
-  // Evict expired entries if map is large
-  if (Object.keys(loginAttempts).length > 500) {
-    const now = Date.now();
-    for (const k of Object.keys(loginAttempts)) {
-      if ((loginAttempts[k].lockedUntil || 0) < now) delete loginAttempts[k];
-    }
-  }
-
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
 
-  const attempts = loginAttempts[userId] || { count: 0, lockedUntil: 0 };
-  if (attempts.lockedUntil > Date.now()) {
+  const now = Date.now();
+  // Durable lockout: check persisted state, and skip bcrypt entirely if locked.
+  if ((user.locked_until || 0) > now) {
     return res.status(429).json({ error: 'Too many attempts. Try again later.' });
   }
 
   const match = bcrypt.compareSync(String(pin), user.pin_hash);
-  if (!match) {
-    attempts.count = (attempts.count || 0) + 1;
-    if (attempts.count >= 5) {
-      attempts.lockedUntil = Date.now() + 30 * 60 * 1000; // 30 min lockout
-      attempts.count = 0;
-    }
-    loginAttempts[userId] = attempts;
-    return res.status(401).json({ error: 'Invalid PIN' });
+  const outcome = loginOutcome({
+    lockedUntil: user.locked_until || 0,
+    failedAttempts: user.failed_attempts || 0,
+    pinMatches: match,
+    now,
+  });
+  db.prepare('UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?')
+    .run(outcome.failedAttempts, outcome.lockedUntil, userId);
+
+  if (!outcome.ok) {
+    return res.status(outcome.status).json({ error: outcome.error });
   }
 
-  delete loginAttempts[userId];
   // Regenerate the session id on login to prevent session fixation.
   return req.session.regenerate((err) => {
     if (err) return res.status(500).json({ error: 'Could not start session' });
@@ -254,4 +263,4 @@ function authMiddleware(req, res, next) {
   res.status(401).json({ error: 'Not authenticated' });
 }
 
-module.exports = { router, authMiddleware, evaluateSignup, canDeleteUser };
+module.exports = { router, authMiddleware, evaluateSignup, canDeleteUser, loginOutcome };
