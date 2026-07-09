@@ -246,7 +246,7 @@
                   <template x-if="form.intervalUnit!=='minutes'">
                     <input class="input" type="number" min="1" step="1" x-model.number="form.intervalValue">
                   </template>
-                  <select class="input" x-model="form.intervalUnit">
+                  <select class="input" x-model="form.intervalUnit" @change="onIntervalUnitChange()">
                     <option value="minutes">minutes</option>
                     <option value="hours">hours</option>
                     <option value="days">days</option>
@@ -258,9 +258,9 @@
                   <div>
                     <div class="inline-row" style="margin-top:.7rem">
                       <span style="color:var(--ink-soft);font-weight:600">between</span>
-                      <input class="input" type="number" min="0" max="23" x-model.number="form.windowStart">
+                      <input class="input" type="number" min="0" max="23" step="1" x-model.number="form.windowStart">
                       <span style="color:var(--ink-soft);font-weight:600">and</span>
-                      <input class="input" type="number" min="0" max="23" x-model.number="form.windowEnd">
+                      <input class="input" type="number" min="0" max="23" step="1" x-model.number="form.windowEnd">
                       <span class="hint" style="margin:0">o'clock</span>
                     </div>
                     <div class="chips" style="margin:.8rem 0 0">
@@ -648,6 +648,17 @@
         toggleDay(idx) {
           const p = this.form.days.indexOf(idx);
           if (p === -1) this.form.days.push(idx); else this.form.days.splice(p, 1);
+        },
+        onIntervalUnitChange() {
+          const u = this.form.intervalUnit;
+          const v = Number(this.form.intervalValue);
+          if (u === 'minutes') {
+            if (![5, 10, 15, 20, 30].includes(v)) this.form.intervalValue = 5;
+          } else if (u === 'hours') {
+            if (!Number.isInteger(v) || v < 1 || v > 23) this.form.intervalValue = 1;
+          } else { // days
+            if (!Number.isInteger(v) || v < 1) this.form.intervalValue = 1;
+          }
         },
         async saveInlineContact() {
           const phone = normPhone(this.newContact.phone);
