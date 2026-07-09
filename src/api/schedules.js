@@ -27,9 +27,11 @@ function toCron(schedule) {
 
 function detectScheduleType(cronExpr) {
   const parts = cronExpr.split(' ');
-  if (parts[2] !== '*') return 'interval'; // day-of-month has */N
-  if (parts[4] !== '*') return 'weekly';   // day-of-week has values
-  if (parts[1] !== '*') return 'daily';
+  // Check interval first (must come before daily/weekly checks)
+  if (parts[2] && parts[2].startsWith('*/')) return 'interval'; // */D days
+  if (parts[1] && parts[1].startsWith('*/')) return 'interval'; // */H hours
+  if (parts[4] && parts[4] !== '*') return 'weekly';
+  if (parts[1] && parts[1] !== '*') return 'daily';
   return 'interval';
 }
 

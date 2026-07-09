@@ -22,7 +22,7 @@ const app = express();
 const SQLiteStore = require('connect-sqlite3')(session);
 
 app.use(session({
-  store: new SQLiteStore({ db: 'sessions.db', dir: './data' }),
+  store: new SQLiteStore({ db: 'sessions.db', dir: path.join(__dirname, '../data') }),
   secret: process.env.SESSION_SECRET || 'wa-scheduler-secret',
   resave: false,
   saveUninitialized: false,

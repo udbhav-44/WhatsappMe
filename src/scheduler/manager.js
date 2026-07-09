@@ -23,8 +23,10 @@ function estimateNextRun(cronExpr) {
     const days = parseInt(parts[2].slice(2), 10);
     return isNaN(days) ? now + 86400 : now + days * 86400;
   }
-  // Daily or weekly — minimum 23h ahead
-  return now + 23 * 3600;
+  // Weekly: day-of-week is set
+  if (parts[4] && parts[4] !== '*') return now + 7 * 24 * 3600;
+  // Daily
+  return now + 24 * 3600;
 }
 
 function getRecipients(schedule) {
@@ -47,11 +49,17 @@ async function fireSchedule(schedule) {
   const { render } = require('../templates/renderer');
 
   const template = db.prepare('SELECT * FROM templates WHERE id = ?').get(schedule.template_id);
+  if (!template) {
+    console.warn(`[Scheduler] Schedule ${schedule.id} references deleted template ${schedule.template_id} — skipping send`);
+    db.prepare('UPDATE schedules SET last_run = unixepoch(), next_run = ? WHERE id = ?')
+      .run(estimateNextRun(schedule.cron_expr), schedule.id);
+    return;
+  }
   const contacts = getRecipients(schedule);
 
   for (const contact of contacts) {
     try {
-      const message = render(template ? template.body : '', contact);
+      const message = render(template.body, contact);
       const ok = await waManager.sendText(schedule.user_id, contact.phone, message);
       const status = ok ? 'sent' : 'failed';
       console.log(`[Scheduler] Schedule "${schedule.name}" (id:${schedule.id}) → ${contact.name} ${contact.phone}: ${status}`);

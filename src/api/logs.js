@@ -47,7 +47,7 @@ router.get('/logs', (req, res) => {
     SELECT l.id, l.schedule_id, l.contact_id, l.phone, l.message_body, l.sent_at, l.status,
            s.name AS schedule_name
     FROM logs l
-    LEFT JOIN schedules s ON s.id = l.schedule_id
+    LEFT JOIN schedules s ON s.id = l.schedule_id AND s.user_id = l.user_id
     WHERE ${where}
     ORDER BY l.sent_at DESC
     LIMIT ? OFFSET ?

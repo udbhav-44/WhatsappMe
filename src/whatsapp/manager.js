@@ -14,7 +14,9 @@ const waContacts = {};
 async function startSession(userId) {
   if (sessions[userId]?.connected) return;
 
-  sessions[userId] = { socket: null, connected: false, qr: null, retrying: false };
+  // Also guard against concurrent calls while session is initializing
+  if (sessions[userId]?.initializing) return;
+  sessions[userId] = { socket: null, connected: false, qr: null, retrying: false, initializing: true };
 
   // Load persisted contacts from disk (survives server restarts)
   const contactsCachePath = path.join(process.cwd(), 'sessions', `user-${userId}`, 'wa-contacts.json');
@@ -41,6 +43,7 @@ async function startSession(userId) {
   });
 
   sessions[userId].socket = sock;
+  sessions[userId].initializing = false;
 
   sock.ev.on('creds.update', saveCreds);
 
@@ -140,17 +143,21 @@ async function resetAppState(userId) {
   await stopSession(userId);
 
   // Delete only the version files (not creds.json — that would log out the user)
-  try {
-    const files = fs.readdirSync(sessionDir);
-    for (const f of files) {
-      // Only delete version markers — not keys (deleting keys breaks decryption)
-      if (f.startsWith('app-state-sync-version-')) {
-        fs.unlinkSync(path.join(sessionDir, f));
+  if (!fs.existsSync(sessionDir)) {
+    console.log(`[WA] User ${userId}: no session dir found, starting fresh`);
+  } else {
+    try {
+      const files = fs.readdirSync(sessionDir);
+      for (const f of files) {
+        // Only delete version markers — not keys (deleting keys breaks decryption)
+        if (f.startsWith('app-state-sync-version-')) {
+          fs.unlinkSync(path.join(sessionDir, f));
+        }
       }
+      console.log(`[WA] User ${userId}: app state cleared — reconnecting`);
+    } catch (err) {
+      console.error(`[WA] resetAppState error:`, err.message);
     }
-    console.log(`[WA] User ${userId}: app state cleared — reconnecting`);
-  } catch (err) {
-    console.error(`[WA] resetAppState error:`, err.message);
   }
 
   // Reconnect — Baileys will now re-download full state and fire contacts.upsert
