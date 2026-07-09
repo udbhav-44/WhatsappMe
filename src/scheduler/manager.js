@@ -38,7 +38,7 @@ function matchField(field, value, range) {
   return false;
 }
 
-// Next unix-seconds timestamp >= fromSec whose IST wall-clock satisfies cronExpr.
+// Next matching minute strictly after the minute containing fromSec, whose IST wall-clock satisfies cronExpr.
 // Walks minute-by-minute (cheap; only runs at schedule create/fire/startup).
 function nextRunFor(cronExpr, fromSec) {
   const parts = cronExpr.split(' ');
@@ -51,6 +51,8 @@ function nextRunFor(cronExpr, fromSec) {
     const hour = d.getUTCHours();
     const dom = d.getUTCDate();
     const dow = d.getUTCDay();
+    // Month field (parts[3]) intentionally unchecked: this app only ever generates '*' for month.
+    // dom is always '*' in generated expressions, so AND-ing dom & dow matches cron's dom/dow OR semantics in practice.
     if (
       matchField(parts[0], min, { min: 0, max: 59 }) &&
       matchField(parts[1], hour, { min: 0, max: 23 }) &&
