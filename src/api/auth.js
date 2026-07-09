@@ -12,8 +12,10 @@ const router = express.Router();
 
 // Per-IP throttles on the credential endpoints (raise the bar against
 // brute-force / enumeration bursts, on top of the per-user login lockout).
-const loginLimiter = rateLimit(20, 10 * 60 * 1000);   // 20 / 10 min / IP
-const signupLimiter = rateLimit(15, 10 * 60 * 1000);  // 15 / 10 min / IP
+// Login: key by IP+userId so hammering one account can't lock out others
+// (important behind the tunnel, where many clients can share an upstream IP).
+const loginLimiter = rateLimit(20, 10 * 60 * 1000, (req) => `${req.ip || '?'}:${req.body && req.body.userId}`);
+const signupLimiter = rateLimit(15, 10 * 60 * 1000); // signup has no userId — key by IP
 
 // The first account (the setup owner who sets SIGNUP_CODE) is the admin.
 const ADMIN_USER_ID = 1;
