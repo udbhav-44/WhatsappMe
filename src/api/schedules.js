@@ -65,8 +65,7 @@ function toCron(schedule) {
       return `*/${intervalValue} ${windowHourField(ws, we)} * * ${dowField(days)}`;
     }
     if (intervalUnit === 'hours') {
-      const hf = windowHourField(ws, we);
-      const stepField = hf === '*' ? `*/${intervalValue}` : `${hf}/${intervalValue}`;
+      const stepField = (ws === 0 && we === 23) ? `*/${intervalValue}` : `${ws}-${we}/${intervalValue}`;
       return `0 ${stepField} * * ${dowField(days)}`;
     }
     if (intervalUnit === 'days') {
@@ -301,6 +300,9 @@ router.put('/schedules/:id', (req, res) => {
     }
   }
 
+  // merged pulls timing fields straight from body (no fallback to existing):
+  // the only caller (UI saveComposer) always sends a full payload, and
+  // validateScheduleBody + toCron defaults guard malformed/partial input.
   const merged = {
     name: body.name !== undefined ? String(body.name).trim() : existing.name,
     templateId: body.templateId !== undefined ? body.templateId : existing.template_id,

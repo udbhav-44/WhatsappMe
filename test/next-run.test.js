@@ -63,4 +63,5 @@ test('node-cron accepts the generated expressions', () => {
   assert.ok(cron.validate('0 9-18/2 * * 1,2,3,4,5'));
   assert.ok(cron.validate('0 */2 * * *'));
   assert.ok(cron.validate('0 0 */3 * *'));
+  assert.ok(cron.validate('0 9-9/2 * * *'));
 });

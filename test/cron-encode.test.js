@@ -8,6 +8,7 @@ const cases = [
   { in: { scheduleType:'interval', intervalUnit:'minutes', intervalValue:15, windowStart:8, windowEnd:20, days:[1,2,3,4,5] }, cron: '*/15 8-20 * * 1,2,3,4,5' },
   { in: { scheduleType:'interval', intervalUnit:'hours', intervalValue:2, windowStart:9, windowEnd:18, days:[1,2,3,4,5] }, cron: '0 9-18/2 * * 1,2,3,4,5' },
   { in: { scheduleType:'interval', intervalUnit:'hours', intervalValue:2, windowStart:0, windowEnd:23, days:[] }, cron: '0 */2 * * *' },
+  { in: { scheduleType:'interval', intervalUnit:'hours', intervalValue:2, windowStart:9, windowEnd:9, days:[] }, cron: '0 9-9/2 * * *' },
   { in: { scheduleType:'interval', intervalUnit:'days', intervalValue:3 }, cron: '0 0 */3 * *' },
   { in: { scheduleType:'daily', timeHour:8, timeMinute:30 }, cron: '30 8 * * *' },
   { in: { scheduleType:'weekly', timeHour:9, timeMinute:0, days:[1,3] }, cron: '0 9 * * 1,3' },
