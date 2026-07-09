@@ -9,6 +9,10 @@ const qrcode = require('qrcode');
 // sessions[userId] = { socket: null, connected: false, qr: null, retrying: false }
 const sessions = {};
 
+// WA contact list per user (populated on contacts.upsert event)
+// waContacts[userId] = [{ name, phone }]
+const waContacts = {};
+
 async function startSession(userId) {
   if (sessions[userId]?.connected) return; // already connected
 
@@ -31,6 +35,20 @@ async function startSession(userId) {
   sessions[userId].socket = sock;
 
   sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('contacts.upsert', (contacts) => {
+    if (!waContacts[userId]) waContacts[userId] = [];
+    for (const c of contacts) {
+      if (!c.id || !c.id.endsWith('@s.whatsapp.net')) continue; // skip groups
+      const phone = '+' + c.id.replace('@s.whatsapp.net', '');
+      const name = c.notify || c.name || c.verifiedName || '';
+      if (!name) continue; // skip nameless entries
+      // upsert by phone
+      const existing = waContacts[userId].findIndex(x => x.phone === phone);
+      if (existing >= 0) waContacts[userId][existing] = { name, phone };
+      else waContacts[userId].push({ name, phone });
+    }
+  });
 
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
     if (qr) {
@@ -105,4 +123,8 @@ async function startAllSessions() {
   }
 }
 
-module.exports = { startSession, stopSession, sendText, getStatus, startAllSessions };
+function getWAContacts(userId) {
+  return waContacts[userId] || [];
+}
+
+module.exports = { startSession, stopSession, sendText, getStatus, startAllSessions, getWAContacts };

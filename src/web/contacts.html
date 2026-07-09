@@ -74,6 +74,7 @@
         <div class="card">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
             <strong style="font-size:1rem">All Contacts (<span x-text="contacts.length"></span>)</strong>
+            <button class="btn btn-sm" @click="openImport()">⬇ Import from WhatsApp</button>
             <button class="btn btn-sm" @click="openModal(null)">+ Add Contact</button>
           </div>
 
@@ -196,6 +197,49 @@
           </button>
         </div>
       </div>
+    <!-- Import from WhatsApp modal -->
+    <div class="modal-overlay" x-show="showImport" x-cloak @click.self="showImport=false">
+      <div class="modal" style="max-width:500px;max-height:80vh;display:flex;flex-direction:column">
+        <h2>Import from WhatsApp</h2>
+        <div x-show="importLoading" style="text-align:center;padding:2rem">Loading contacts…</div>
+        <template x-if="!importLoading">
+          <div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+            <template x-if="importContacts.length === 0">
+              <div style="padding:1rem;color:#666">
+                No new contacts to import. Either WhatsApp hasn't synced yet (connect first) or all contacts are already saved.
+              </div>
+            </template>
+            <template x-if="importContacts.length > 0">
+              <div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+                  <span style="font-size:0.9rem;color:#666" x-text="`${importContacts.length} new contacts found`"></span>
+                  <button class="btn btn-sm" style="background:#f1f5f9;color:#333" @click="toggleImportAll()">Toggle All</button>
+                </div>
+                <div style="overflow-y:auto;flex:1;border:1px solid #e2e8f0;border-radius:8px">
+                  <template x-for="c in importContacts" :key="c.phone">
+                    <label style="display:flex;align-items:center;gap:0.75rem;padding:0.65rem 1rem;border-bottom:1px solid #f1f5f9;cursor:pointer">
+                      <input type="checkbox" :checked="importSelected[c.phone]" @change="importSelected[c.phone] = $event.target.checked" style="width:18px;height:18px">
+                      <div>
+                        <div style="font-weight:500" x-text="c.name"></div>
+                        <div style="font-size:0.85rem;color:#888" x-text="c.phone"></div>
+                      </div>
+                    </label>
+                  </template>
+                </div>
+              </div>
+            </template>
+            <div x-show="importStatus" style="margin-top:0.75rem;font-size:0.9rem;color:#16a34a" x-text="importStatus"></div>
+            <div style="display:flex;gap:0.5rem;margin-top:1rem">
+              <button class="btn" @click="doImport()"
+                :disabled="!importContacts.some(c => importSelected[c.phone])"
+                x-text="`Import Selected (${importContacts.filter(c => importSelected[c.phone]).length})`">
+              </button>
+              <button class="btn btn-danger" @click="showImport=false">Cancel</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
     </div>
   </div>
 
@@ -212,6 +256,11 @@
         formError: '',
         saving: false,
         error: '',
+        showImport: false,
+        importContacts: [],
+        importSelected: {},
+        importLoading: false,
+        importStatus: '',
         newGroupName: '',
         expandedGroup: null,
         addMemberContactId: '',
@@ -368,6 +417,43 @@
           if (!res) return;
           await this.loadGroups();
           this.expandedGroup = groupId;
+        },
+
+        async openImport() {
+          this.importLoading = true;
+          this.importStatus = '';
+          this.importSelected = {};
+          this.showImport = true;
+          const res = await this.apiFetch('/api/whatsapp/contacts');
+          this.importLoading = false;
+          if (!res) return;
+          const all = await res.json();
+          // Filter out already-saved contacts by phone
+          const existing = new Set(this.contacts.map(c => c.phone));
+          this.importContacts = all.filter(c => !existing.has(c.phone));
+        },
+
+        toggleImportAll() {
+          const allSelected = this.importContacts.every(c => this.importSelected[c.phone]);
+          this.importContacts.forEach(c => { this.importSelected[c.phone] = !allSelected; });
+        },
+
+        async doImport() {
+          const toImport = this.importContacts.filter(c => this.importSelected[c.phone]);
+          if (!toImport.length) return;
+          this.importStatus = `Importing ${toImport.length} contacts…`;
+          let done = 0;
+          for (const c of toImport) {
+            const res = await this.apiFetch('/api/contacts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: c.name, phone: c.phone }),
+            });
+            if (res?.ok) done++;
+          }
+          this.importStatus = `✅ Imported ${done} of ${toImport.length} contacts.`;
+          await this.loadContacts();
+          setTimeout(() => { this.showImport = false; this.importStatus = ''; }, 1500);
         },
 
         async logout() {

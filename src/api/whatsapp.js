@@ -29,4 +29,11 @@ router.post('/reconnect', async (req, res) => {
   res.json({ ok: true });
 });
 
+// GET /api/whatsapp/contacts
+// Returns WA contact list synced from WhatsApp (populated after connection)
+router.get('/contacts', (req, res) => {
+  const contacts = waManager.getWAContacts(req.session.userId);
+  res.json(contacts);
+});
+
 module.exports = router;
