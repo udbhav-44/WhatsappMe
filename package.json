@@ -7,7 +7,7 @@
     "start": "node src/server.js",
     "share": "node scripts/share.js",
     "setup-autostart": "node scripts/setup-autostart.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",

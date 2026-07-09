@@ -10,23 +10,61 @@ const crons = {};
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-function estimateNextRun(cronExpr) {
+const IST_OFFSET = 19800; // Asia/Kolkata = UTC+05:30, no DST
+
+// Match a single cron field (already split) against a numeric value.
+// range = { min, max } for the field (used by '*' steps and open-ended steps).
+function matchField(field, value, range) {
+  if (field === '*') return true;
+  for (const part of field.split(',')) {
+    if (part.startsWith('*/')) {
+      const step = Number(part.slice(2));
+      if ((value - range.min) % step === 0) return true;
+    } else if (part.includes('/')) {
+      const [base, stepStr] = part.split('/');
+      const step = Number(stepStr);
+      let lo, hi;
+      if (base === '*') { lo = range.min; hi = range.max; }
+      else if (base.includes('-')) { [lo, hi] = base.split('-').map(Number); }
+      else { lo = Number(base); hi = range.max; }
+      if (value >= lo && value <= hi && (value - lo) % step === 0) return true;
+    } else if (part.includes('-')) {
+      const [lo, hi] = part.split('-').map(Number);
+      if (value >= lo && value <= hi) return true;
+    } else if (Number(part) === value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Next unix-seconds timestamp >= fromSec whose IST wall-clock satisfies cronExpr.
+// Walks minute-by-minute (cheap; only runs at schedule create/fire/startup).
+function nextRunFor(cronExpr, fromSec) {
   const parts = cronExpr.split(' ');
-  const now = Math.floor(Date.now() / 1000);
-  // Interval hours: "0 */H * * *"
-  if (parts[1] && parts[1].startsWith('*/')) {
-    const hours = parseInt(parts[1].slice(2), 10);
-    return isNaN(hours) ? now + 3600 : now + hours * 3600;
+  const start = (fromSec === undefined ? Math.floor(Date.now() / 1000) : fromSec);
+  let t = start - (start % 60) + 60; // next whole minute
+  const maxT = t + 366 * 24 * 3600;
+  for (; t <= maxT; t += 60) {
+    const d = new Date((t + IST_OFFSET) * 1000);
+    const min = d.getUTCMinutes();
+    const hour = d.getUTCHours();
+    const dom = d.getUTCDate();
+    const dow = d.getUTCDay();
+    if (
+      matchField(parts[0], min, { min: 0, max: 59 }) &&
+      matchField(parts[1], hour, { min: 0, max: 23 }) &&
+      matchField(parts[2], dom, { min: 1, max: 31 }) &&
+      matchField(parts[4], dow, { min: 0, max: 6 })
+    ) {
+      return t;
+    }
   }
-  // Interval days: "0 0 */D * *"
-  if (parts[2] && parts[2].startsWith('*/')) {
-    const days = parseInt(parts[2].slice(2), 10);
-    return isNaN(days) ? now + 86400 : now + days * 86400;
-  }
-  // Weekly: day-of-week is set
-  if (parts[4] && parts[4] !== '*') return now + 7 * 24 * 3600;
-  // Daily
-  return now + 24 * 3600;
+  return start + 24 * 3600; // fallback: never expected for our expressions
+}
+
+function estimateNextRun(cronExpr) {
+  return nextRunFor(cronExpr);
 }
 
 function getRecipients(schedule) {
@@ -172,4 +210,4 @@ async function reload(userId) {
   console.log(`[Scheduler] Reloaded ${schedules.length} active schedule(s) for user ${userId}`);
 }
 
-module.exports = { init, reload };
+module.exports = { init, reload, matchField, nextRunFor };
