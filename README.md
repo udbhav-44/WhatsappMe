@@ -68,6 +68,16 @@ each time). Unset or `0` = exact time, no jitter. For short repeat intervals the
 jitter is automatically capped to under half the interval so messages can't
 overlap or arrive out of order. Restart after changing it.
 
+## Locked out? (too many wrong PINs)
+
+After 5 wrong PINs an account locks for 30 minutes (brute-force protection, and
+it survives restarts). To clear it immediately, on the server:
+
+```
+npm run unlock        # clear all accounts
+npm run unlock 2      # clear just user id 2
+```
+
 ## Autostart on your own computer (runs on login)
 
 ```
