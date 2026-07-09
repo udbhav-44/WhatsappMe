@@ -6,8 +6,14 @@ const bcrypt = require('bcryptjs');
 const fs = require('fs');
 const path = require('path');
 const db = require('../db');
+const { rateLimit } = require('./rate-limit');
 
 const router = express.Router();
+
+// Per-IP throttles on the credential endpoints (raise the bar against
+// brute-force / enumeration bursts, on top of the per-user login lockout).
+const loginLimiter = rateLimit(20, 10 * 60 * 1000);   // 20 / 10 min / IP
+const signupLimiter = rateLimit(15, 10 * 60 * 1000);  // 15 / 10 min / IP
 
 // The first account (the setup owner who sets SIGNUP_CODE) is the admin.
 const ADMIN_USER_ID = 1;
@@ -25,7 +31,7 @@ function canDeleteUser(requesterId, targetId) {
 const loginAttempts = {}; // { userId: { count, lockedUntil } }
 
 // POST /api/auth/login
-router.post('/login', (req, res) => {
+router.post('/login', loginLimiter, (req, res) => {
   const userId = parseInt(req.body.userId, 10);
   if (!userId || isNaN(userId)) return res.status(400).json({ error: 'Invalid userId' });
   const { pin } = req.body;
@@ -63,8 +69,15 @@ router.post('/login', (req, res) => {
   }
 
   delete loginAttempts[userId];
-  req.session.userId = user.id;
-  return res.status(200).json({ ok: true, user: { id: user.id, name: user.name } });
+  // Regenerate the session id on login to prevent session fixation.
+  return req.session.regenerate((err) => {
+    if (err) return res.status(500).json({ error: 'Could not start session' });
+    req.session.userId = user.id;
+    req.session.save((e) => {
+      if (e) return res.status(500).json({ error: 'Could not start session' });
+      res.status(200).json({ ok: true, user: { id: user.id, name: user.name } });
+    });
+  });
 });
 
 // POST /api/auth/logout
@@ -150,9 +163,12 @@ router.post('/setup', (req, res) => {
 
 // Pure gate for self-signup — decides the response without touching db/session.
 // Returns { status, ok?, error?, attempts } where attempts is the next throttle state.
-function evaluateSignup({ envCode, providedCode, name, pin, attempts, now }) {
+function evaluateSignup({ envCode, providedCode, name, pin, attempts, now, usersExist }) {
   const code = (envCode || '').trim();
   if (!code) return { status: 403, error: 'Signup is disabled', attempts };
+  // The owner (id 1) must be created via /setup first, so a signup can never
+  // land as id 1 and inherit admin. Refuse until the owner exists.
+  if (usersExist === false) return { status: 409, error: 'Setup not complete yet', attempts };
   if (attempts.lockedUntil > now) {
     return { status: 429, error: 'Too many attempts. Try again later.', attempts };
   }
@@ -173,7 +189,8 @@ function evaluateSignup({ envCode, providedCode, name, pin, attempts, now }) {
 let signupAttempts = { count: 0, lockedUntil: 0 };
 
 // POST /api/auth/signup — public self-signup gated by a shared invite code
-router.post('/signup', (req, res) => {
+router.post('/signup', signupLimiter, (req, res) => {
+  const userCount = db.prepare('SELECT COUNT(*) AS cnt FROM users').get().cnt;
   const result = evaluateSignup({
     envCode: process.env.SIGNUP_CODE,
     providedCode: req.body.code,
@@ -181,6 +198,7 @@ router.post('/signup', (req, res) => {
     pin: req.body.pin,
     attempts: signupAttempts,
     now: Date.now(),
+    usersExist: userCount > 0,
   });
   signupAttempts = result.attempts;
   if (!result.ok) return res.status(result.status).json({ error: result.error });
@@ -192,9 +210,16 @@ router.post('/signup', (req, res) => {
   const id = info.lastInsertRowid;
   db.prepare('UPDATE users SET session_dir = ? WHERE id = ?').run(`sessions/user-${id}`, id);
 
-  req.session.userId = id; // auto-login the new user
   const user = db.prepare('SELECT id, name FROM users WHERE id = ?').get(id);
-  return res.status(201).json({ ok: true, user: { id: user.id, name: user.name } });
+  // Regenerate the session id before auto-login (prevents session fixation).
+  return req.session.regenerate((err) => {
+    if (err) return res.status(500).json({ error: 'Could not start session' });
+    req.session.userId = id;
+    req.session.save((e) => {
+      if (e) return res.status(500).json({ error: 'Could not start session' });
+      res.status(201).json({ ok: true, user: { id: user.id, name: user.name } });
+    });
+  });
 });
 
 // POST /api/auth/users — create additional user (must be logged in)
