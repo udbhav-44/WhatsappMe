@@ -1,10 +1,12 @@
 // src/scheduler/manager.js
 'use strict';
 
-const cron = require('node-cron');
+// In-memory state: timers[userId] = Map<scheduleId, { handle, stopped }>
+// Each schedule is driven by a self-rescheduling setTimeout (not node-cron),
+// so we can fire a few minutes before/after the intended time (send jitter).
+const timers = {};
 
-// In-memory state: crons[userId] = Map<scheduleId, cronJob>
-const crons = {};
+const MAX_TIMEOUT = 2_000_000_000; // setTimeout caps near 2^31-1 ms (~24.8 days) — chunk longer waits
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -65,8 +67,47 @@ function nextRunFor(cronExpr, fromSec) {
   return start + 24 * 3600; // fallback: never expected for our expressions
 }
 
-function estimateNextRun(cronExpr) {
-  return nextRunFor(cronExpr);
+// Approximate seconds between fires, per cron form (used to cap jitter).
+function intervalSeconds(cronExpr) {
+  const [min, hour, dom] = cronExpr.split(' ');
+  if (min.startsWith('*/')) return Number(min.slice(2)) * 60;            // minutes interval
+  if (hour.includes('/')) return Number(hour.split('/')[1]) * 3600;      // hours interval
+  if (dom.startsWith('*/')) return Number(dom.slice(2)) * 86400;         // days interval
+  return 86400;                                                          // daily / weekly — >= a day
+}
+
+// Max jitter magnitude (seconds) for this schedule. Reads JITTER_MINUTES from
+// the environment (0/unset/invalid → no jitter). Capped to stay under half the
+// interval (minus a 30s buffer) so short intervals don't overlap or reorder.
+function jitterMaxSeconds(cronExpr) {
+  const mins = parseFloat(process.env.JITTER_MINUTES);
+  if (!Number.isFinite(mins) || mins <= 0) return 0;
+  const base = mins * 60;
+  const iv = intervalSeconds(cronExpr);
+  // Cap to under half the interval (−30s buffer) so windows never overlap/reorder.
+  // Applies to daily/weekly too, guarding against an absurd JITTER_MINUTES.
+  const cap = Math.max(0, Math.floor(iv / 2) - 30);
+  return Math.round(Math.min(base, cap));
+}
+
+// Random offset in [-J, +J] seconds for this schedule (0 when jitter disabled).
+function jitterOffset(cronExpr) {
+  const j = jitterMaxSeconds(cronExpr);
+  if (j <= 0) return 0;
+  return Math.round((Math.random() * 2 - 1) * j);
+}
+
+// First intended fire at/after fromSec, skipping a slot that `lastRun` shows was
+// already fired early (within its jitter window). Used on init/reload so a
+// restart or a reload (which re-arms all of a user's schedules) during the
+// jitter window can't re-select an occurrence that already sent → no double-send.
+function nextIntendedRun(cronExpr, fromSec, lastRun) {
+  let T = nextRunFor(cronExpr, fromSec);
+  const J = jitterMaxSeconds(cronExpr);
+  if (lastRun && J > 0 && lastRun >= T - J && lastRun <= T) {
+    T = nextRunFor(cronExpr, T + 60);
+  }
+  return T;
 }
 
 function getRecipients(schedule) {
@@ -91,8 +132,7 @@ async function fireSchedule(schedule) {
   const template = db.prepare('SELECT * FROM templates WHERE id = ?').get(schedule.template_id);
   if (!template) {
     console.warn(`[Scheduler] Schedule ${schedule.id} references deleted template ${schedule.template_id} — skipping send`);
-    db.prepare('UPDATE schedules SET last_run = unixepoch(), next_run = ? WHERE id = ?')
-      .run(estimateNextRun(schedule.cron_expr), schedule.id);
+    db.prepare('UPDATE schedules SET last_run = unixepoch() WHERE id = ?').run(schedule.id);
     return;
   }
   const contacts = getRecipients(schedule);
@@ -131,9 +171,8 @@ async function fireSchedule(schedule) {
     }
   }
 
-  // Update last_run and set estimated next_run for missed-message recovery
-  db.prepare('UPDATE schedules SET last_run = unixepoch(), next_run = ? WHERE id = ?')
-    .run(estimateNextRun(schedule.cron_expr), schedule.id);
+  // next_run (for missed-message recovery) is maintained by armSchedule.
+  db.prepare('UPDATE schedules SET last_run = unixepoch() WHERE id = ?').run(schedule.id);
 }
 
 function logMissed(schedule) {
@@ -151,18 +190,49 @@ function logMissed(schedule) {
   }
 }
 
-function startJob(schedule) {
-  const job = cron.schedule(schedule.cron_expr, async () => {
-    await fireSchedule(schedule).catch(err =>
-      console.error(`[Scheduler] Uncaught error in schedule ${schedule.id}:`, err.message)
-    );
-  }, {
-    scheduled: true,
-    timezone: 'Asia/Kolkata', // IST — hardcoded for this family use case
-  });
+function clearUserTimers(userId) {
+  if (!timers[userId]) return;
+  for (const rec of timers[userId].values()) {
+    rec.stopped = true;
+    if (rec.handle) clearTimeout(rec.handle);
+  }
+  timers[userId] = new Map();
+}
 
-  if (!crons[schedule.user_id]) crons[schedule.user_id] = new Map();
-  crons[schedule.user_id].set(schedule.id, job);
+// Arm the next fire for a schedule. `fromSec` is where the next-run search
+// begins — pass now for the first arm, and (intended T + 60) after a fire so
+// the just-fired occurrence isn't re-selected (which would double-fire when
+// jitter fired us early).
+function armSchedule(schedule, fromSec, reconcile = false) {
+  const db = require('../db');
+  const nowSec = Math.floor(Date.now() / 1000);
+  // reconcile (init/reload): skip an occurrence already fired early. Post-fire
+  // re-arm passes reconcile=false and searches from the just-fired T + 60.
+  const T = reconcile
+    ? nextIntendedRun(schedule.cron_expr, fromSec, schedule.last_run)
+    : nextRunFor(schedule.cron_expr, fromSec);
+  const sendAt = T + jitterOffset(schedule.cron_expr);       // jittered actual send
+  const delayMs = Math.max(0, (sendAt - nowSec) * 1000);
+
+  // Record the upcoming intended fire for missed-recovery on restart.
+  try { db.prepare('UPDATE schedules SET next_run = ? WHERE id = ?').run(T, schedule.id); } catch (_) {}
+
+  if (!timers[schedule.user_id]) timers[schedule.user_id] = new Map();
+  const rec = { handle: null, stopped: false };
+  timers[schedule.user_id].set(schedule.id, rec);
+
+  if (delayMs > MAX_TIMEOUT) {
+    // Wait a chunk, then re-derive the same T and arm the remaining time.
+    rec.handle = setTimeout(() => { if (!rec.stopped) armSchedule(schedule, fromSec, reconcile); }, MAX_TIMEOUT);
+    return;
+  }
+
+  rec.handle = setTimeout(async () => {
+    if (rec.stopped) return;
+    await fireSchedule(schedule).catch(err =>
+      console.error(`[Scheduler] Uncaught error in schedule ${schedule.id}:`, err.message));
+    if (!rec.stopped) armSchedule(schedule, T + 60, false);  // next occurrence
+  }, delayMs);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -186,7 +256,7 @@ async function init() {
       }
     }
 
-    startJob(schedule);
+    armSchedule(schedule, Math.floor(Date.now() / 1000), true);
   }
 
   console.log(`[Scheduler] Initialized ${schedules.length} active schedule(s)`);
@@ -201,15 +271,16 @@ async function reload(userId) {
     console.error(`[Scheduler] reload failed for user ${userId} (DB error): ${err.message} — keeping existing jobs`);
     return;
   }
-  // Only stop old jobs after successful DB read
-  if (crons[userId]) {
-    for (const job of crons[userId].values()) job.stop();
-  }
-  crons[userId] = new Map();
+  // Only stop old timers after successful DB read
+  clearUserTimers(userId);
+  const nowSec = Math.floor(Date.now() / 1000);
   for (const schedule of schedules) {
-    startJob(schedule);
+    armSchedule(schedule, nowSec, true);
   }
   console.log(`[Scheduler] Reloaded ${schedules.length} active schedule(s) for user ${userId}`);
 }
 
-module.exports = { init, reload, matchField, nextRunFor };
+module.exports = {
+  init, reload, matchField, nextRunFor,
+  intervalSeconds, jitterMaxSeconds, jitterOffset, nextIntendedRun,
+};

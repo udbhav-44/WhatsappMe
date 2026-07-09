@@ -53,6 +53,21 @@ off (so a public URL can't be used by strangers).
 
 Leave `SIGNUP_CODE` unset to keep signup disabled.
 
+## Human-like send timing (jitter)
+
+By default a scheduled message fires at the exact set time. To make sends look
+manual, set a jitter window in `.env`:
+
+```
+JITTER_MINUTES=3
+```
+
+Each send then goes out at a random time within **± that many minutes** of the
+scheduled time (e.g. `3` → anywhere from 3 min early to 3 min late, different
+each time). Unset or `0` = exact time, no jitter. For short repeat intervals the
+jitter is automatically capped to under half the interval so messages can't
+overlap or arrive out of order. Restart after changing it.
+
 ## Autostart on your own computer (runs on login)
 
 ```
