@@ -53,12 +53,22 @@
   <main class="shell">
 
     <!-- connection banner (only when disconnected) -->
-    <div class="banner enter" x-show="!wa.connected" x-cloak>
+    <div class="banner enter" x-show="!wa.connected && !postConnect" x-cloak>
       <div class="b-body">
         <div class="b-title">WhatsApp isn't connected</div>
         <div class="b-sub">Messages won't send until you connect. Tap to scan the code.</div>
       </div>
       <button class="btn btn-sm" @click="openConnection()">Connect</button>
+    </div>
+
+    <!-- just-connected: offer to import contacts -->
+    <div class="banner enter" x-show="postConnect" x-cloak>
+      <div class="b-body">
+        <div class="b-title">Connected. Bring in your contacts?</div>
+        <div class="b-sub">Import people straight from WhatsApp so you don't have to add them by hand.</div>
+      </div>
+      <button class="btn btn-sm" @click="importFromPrompt()">Import contacts</button>
+      <button class="btn btn-quiet btn-sm" @click="postConnect=false">Later</button>
     </div>
 
     <div class="page-head enter">
@@ -471,6 +481,8 @@
         menuOpen: false,
         toast: '',
         wa: { connected: false, qr: null },
+        postConnect: false,
+        _statusInit: false,
         schedules: [],
         templates: [],
         contacts: [],
@@ -784,7 +796,20 @@
         async loadStatus() {
           const r = await this.apiFetch('/api/whatsapp/status');
           if (!r) return;
+          const wasConnected = this.wa.connected;
           this.wa = await r.json();
+          // Offer contact import right after a fresh connection (not on page load)
+          if (this._statusInit && !wasConnected && this.wa.connected) {
+            this.connView.open = false;
+            this.postConnect = true;
+          }
+          this._statusInit = true;
+        },
+        async importFromPrompt() {
+          this.postConnect = false;
+          this.openContacts();
+          await this.startImport();
+          if (this.importer.list.length === 0) await this.syncContacts();
         },
         async reconnect() {
           this.connView.working = true;
