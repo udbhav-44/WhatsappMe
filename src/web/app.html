@@ -231,13 +231,46 @@
 
             <!-- interval -->
             <template x-if="form.scheduleType==='interval'">
-              <div class="inline-row">
-                <span style="color:var(--ink-soft);font-weight:600">Every</span>
-                <input class="input" type="number" min="1" step="1" x-model.number="form.intervalValue">
-                <select class="input" x-model="form.intervalUnit">
-                  <option value="hours">hours</option>
-                  <option value="days">days</option>
-                </select>
+              <div>
+                <div class="inline-row">
+                  <span style="color:var(--ink-soft);font-weight:600">Every</span>
+                  <template x-if="form.intervalUnit==='minutes'">
+                    <select class="input" x-model.number="form.intervalValue">
+                      <option :value="5">5</option>
+                      <option :value="10">10</option>
+                      <option :value="15">15</option>
+                      <option :value="20">20</option>
+                      <option :value="30">30</option>
+                    </select>
+                  </template>
+                  <template x-if="form.intervalUnit!=='minutes'">
+                    <input class="input" type="number" min="1" step="1" x-model.number="form.intervalValue">
+                  </template>
+                  <select class="input" x-model="form.intervalUnit">
+                    <option value="minutes">minutes</option>
+                    <option value="hours">hours</option>
+                    <option value="days">days</option>
+                  </select>
+                </div>
+
+                <!-- daytime window (minutes/hours only) -->
+                <template x-if="form.intervalUnit==='minutes' || form.intervalUnit==='hours'">
+                  <div>
+                    <div class="inline-row" style="margin-top:.7rem">
+                      <span style="color:var(--ink-soft);font-weight:600">between</span>
+                      <input class="input" type="number" min="0" max="23" x-model.number="form.windowStart">
+                      <span style="color:var(--ink-soft);font-weight:600">and</span>
+                      <input class="input" type="number" min="0" max="23" x-model.number="form.windowEnd">
+                      <span class="hint" style="margin:0">o'clock</span>
+                    </div>
+                    <div class="chips" style="margin:.8rem 0 0">
+                      <template x-for="(d, idx) in dayNames" :key="idx">
+                        <span class="chip" :class="{ on: form.days.includes(idx) }" @click="toggleDay(idx)" x-text="d"></span>
+                      </template>
+                    </div>
+                    <div class="hint" style="margin:.4rem 0 0">No days selected = every day.</div>
+                  </div>
+                </template>
               </div>
             </template>
           </div>
@@ -548,7 +581,16 @@
           const pad = n => String(n).padStart(2, '0');
           if (s.scheduleType === 'daily') return `every day at ${pad(s.timeHour)}:${pad(s.timeMinute)}`;
           if (s.scheduleType === 'weekly') return `${(s.days||[]).map(d => DAY_NAMES[d]).join(', ')} at ${pad(s.timeHour)}:${pad(s.timeMinute)}`;
-          if (s.scheduleType === 'interval') return `every ${s.intervalValue} ${s.intervalUnit}`;
+          if (s.scheduleType === 'interval') {
+            const unit = s.intervalUnit === 'minutes' ? 'min' : s.intervalUnit;
+            let out = `every ${s.intervalValue} ${unit}`;
+            if (s.intervalUnit !== 'days') {
+              const ws = s.windowStart ?? 0, we = s.windowEnd ?? 23;
+              out += (ws === 0 && we === 23) ? ', all day' : `, ${pad(ws)}:00–${pad(we)}:59`;
+              if (s.days && s.days.length) out += `, ${s.days.map(d => DAY_NAMES[d]).join(', ')}`;
+            }
+            return out;
+          }
           return '';
         },
         fmtTime(ts) { return ts ? new Date(ts * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—'; },
@@ -571,6 +613,8 @@
               days: s.days ? [...s.days] : [],
               intervalValue: s.intervalValue || 1,
               intervalUnit: s.intervalUnit || 'hours',
+              windowStart: s.windowStart ?? 9,
+              windowEnd: s.windowEnd ?? 18,
             };
           } else {
             this.composer = { open: true, editingId: null, templateId: null, saving: false, err: '' };
@@ -634,7 +678,19 @@
           if (f.scheduleType === 'weekly' && f.days.length === 0) return 'Pick at least one day.';
           if (f.scheduleType === 'interval') {
             const v = Number(f.intervalValue);
-            if (!Number.isInteger(v) || v < 1) return 'Repeat value must be a whole number.';
+            if (f.intervalUnit === 'minutes') {
+              if (![5, 10, 15, 20, 30].includes(v)) return 'Minutes must be 5, 10, 15, 20, or 30.';
+            } else if (f.intervalUnit === 'hours') {
+              if (!Number.isInteger(v) || v < 1 || v > 23) return 'Hours must be between 1 and 23.';
+            } else if (!Number.isInteger(v) || v < 1) {
+              return 'Repeat value must be a whole number.';
+            }
+            if (f.intervalUnit === 'minutes' || f.intervalUnit === 'hours') {
+              const ws = Number(f.windowStart), we = Number(f.windowEnd);
+              if (!Number.isInteger(ws) || ws < 0 || ws > 23) return 'Start hour must be 0-23.';
+              if (!Number.isInteger(we) || we < 0 || we > 23) return 'End hour must be 0-23.';
+              if (we < ws) return 'End hour must be after start hour.';
+            }
           }
           return null;
         },
@@ -662,6 +718,7 @@
               scheduleType: this.form.scheduleType,
               timeHour: Number(this.form.timeHour), timeMinute: Number(this.form.timeMinute),
               days: this.form.days, intervalValue: Number(this.form.intervalValue), intervalUnit: this.form.intervalUnit,
+              windowStart: Number(this.form.windowStart), windowEnd: Number(this.form.windowEnd),
             };
             const url = this.composer.editingId ? `/api/schedules/${this.composer.editingId}` : '/api/schedules';
             const method = this.composer.editingId ? 'PUT' : 'POST';
@@ -833,7 +890,7 @@
     }
 
     function blankForm() {
-      return { name: '', body: '', recipientType: 'contact', recipientId: '', scheduleType: 'daily', timeHour: 8, timeMinute: 0, days: [], intervalValue: 1, intervalUnit: 'hours' };
+      return { name: '', body: '', recipientType: 'contact', recipientId: '', scheduleType: 'daily', timeHour: 8, timeMinute: 0, days: [], intervalValue: 1, intervalUnit: 'hours', windowStart: 9, windowEnd: 18 };
     }
     function normPhone(raw) {
       let p = (raw || '').trim().replace(/[\s-]/g, '');
