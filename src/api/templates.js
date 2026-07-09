@@ -67,7 +67,7 @@ router.delete('/templates/:id', (req, res) => {
     return res.status(404).json({ error: 'Template not found' });
   }
 
-  const inUse = db.prepare('SELECT id FROM schedules WHERE template_id = ? AND user_id = ?').get(id, userId);
+  const inUse = db.prepare('SELECT id FROM schedules WHERE template_id = ? AND user_id = ? AND active = 1').get(id, userId);
   if (inUse) {
     return res.status(409).json({ error: 'Template in use by schedules' });
   }

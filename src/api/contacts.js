@@ -72,6 +72,7 @@ router.delete('/contacts/:id', (req, res) => {
     return res.status(404).json({ error: 'Contact not found' });
   }
 
+  db.prepare('DELETE FROM group_contacts WHERE contact_id = ?').run(id);
   db.prepare('DELETE FROM contacts WHERE id = ? AND user_id = ?').run(id, userId);
   return res.json({ ok: true });
 });

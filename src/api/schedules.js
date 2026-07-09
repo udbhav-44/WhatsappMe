@@ -15,7 +15,7 @@ function toCron(schedule) {
     return `${timeMinute} ${timeHour} * * *`;
   }
   if (scheduleType === 'weekly') {
-    const dayList = days.sort().join(',');
+    const dayList = [...days].sort().join(',');
     return `${timeMinute} ${timeHour} * * ${dayList}`;
   }
   if (scheduleType === 'interval') {
@@ -23,6 +23,14 @@ function toCron(schedule) {
     if (intervalUnit === 'days') return `0 0 */${intervalValue} * *`;
   }
   throw new Error('Invalid scheduleType');
+}
+
+function detectScheduleType(cronExpr) {
+  const parts = cronExpr.split(' ');
+  if (parts[2] !== '*') return 'interval'; // day-of-month has */N
+  if (parts[4] !== '*') return 'weekly';   // day-of-week has values
+  if (parts[1] !== '*') return 'daily';
+  return 'interval';
 }
 
 function fromCron(cronExpr, scheduleType) {
@@ -58,7 +66,7 @@ function fromCron(cronExpr, scheduleType) {
       };
     }
   }
-  return { scheduleType, cronExpr };
+  return { scheduleType, intervalValue: 1, intervalUnit: 'hours' };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -153,7 +161,11 @@ router.get('/schedules', (req, res) => {
     WHERE s.user_id = ?
     ORDER BY s.name
   `).all(userId);
-  return res.json(rows);
+  const decoded = rows.map(s => ({
+    ...s,
+    ...fromCron(s.cron_expr, detectScheduleType(s.cron_expr)),
+  }));
+  return res.json(decoded);
 });
 
 // POST /api/schedules
