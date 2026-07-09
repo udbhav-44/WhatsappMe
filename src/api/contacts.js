@@ -37,6 +37,29 @@ router.post('/contacts', (req, res) => {
   return res.status(201).json(contact);
 });
 
+// POST /api/contacts/batch — import multiple contacts in one transaction
+router.post('/contacts/batch', (req, res) => {
+  const userId = req.session.userId;
+  const { contacts } = req.body;
+  if (!Array.isArray(contacts) || contacts.length === 0) {
+    return res.status(400).json({ error: 'contacts array required' });
+  }
+  const insert = db.prepare('INSERT OR IGNORE INTO contacts (user_id, name, phone) VALUES (?, ?, ?)');
+  const insertMany = db.transaction((items) => {
+    let imported = 0;
+    for (const c of items) {
+      const name = String(c.name || '').trim();
+      const phone = String(c.phone || '');
+      if (!name || !PHONE_RE.test(phone)) continue;
+      const info = insert.run(userId, name, phone);
+      if (info.changes) imported++;
+    }
+    return imported;
+  });
+  const imported = insertMany(contacts);
+  return res.json({ imported, total: contacts.length });
+});
+
 // PUT /api/contacts/:id
 router.put('/contacts/:id', (req, res) => {
   const userId = req.session.userId;

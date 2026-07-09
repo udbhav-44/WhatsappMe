@@ -215,8 +215,10 @@
                   <span style="font-size:0.9rem;color:#666" x-text="`${importContacts.length} new contacts found`"></span>
                   <button class="btn btn-sm" style="background:#f1f5f9;color:#333" @click="toggleImportAll()">Toggle All</button>
                 </div>
+                <input type="text" x-model="importSearch" placeholder="Search by name or phone…"
+                  style="width:100%;padding:0.5rem 0.75rem;border:1px solid #e2e8f0;border-radius:8px;font-size:1rem;margin-bottom:0.5rem;box-sizing:border-box">
                 <div style="overflow-y:auto;flex:1;border:1px solid #e2e8f0;border-radius:8px">
-                  <template x-for="c in importContacts" :key="c.phone">
+                  <template x-for="c in filteredImportContacts" :key="c.phone">
                     <label style="display:flex;align-items:center;gap:0.75rem;padding:0.65rem 1rem;border-bottom:1px solid #f1f5f9;cursor:pointer">
                       <input type="checkbox" :checked="importSelected[c.phone]" @change="importSelected[c.phone] = $event.target.checked" style="width:18px;height:18px">
                       <div>
@@ -232,7 +234,8 @@
             <div style="display:flex;gap:0.5rem;margin-top:1rem">
               <button class="btn" @click="doImport()"
                 :disabled="!importContacts.some(c => importSelected[c.phone])"
-                x-text="`Import Selected (${importContacts.filter(c => importSelected[c.phone]).length})`">
+                x-text="`Import Selected (${importContacts.filter(c => importSelected[c.phone]).length})`"
+              >
               </button>
               <button class="btn btn-danger" @click="showImport=false">Cancel</button>
             </div>
@@ -261,6 +264,7 @@
         importSelected: {},
         importLoading: false,
         importStatus: '',
+        importSearch: '',
         newGroupName: '',
         expandedGroup: null,
         addMemberContactId: '',
@@ -419,41 +423,48 @@
           this.expandedGroup = groupId;
         },
 
+        get filteredImportContacts() {
+          const q = this.importSearch.toLowerCase();
+          if (!q) return this.importContacts;
+          return this.importContacts.filter(c =>
+            c.name.toLowerCase().includes(q) || c.phone.includes(q)
+          );
+        },
+
         async openImport() {
           this.importLoading = true;
           this.importStatus = '';
           this.importSelected = {};
+          this.importSearch = '';
           this.showImport = true;
           const res = await this.apiFetch('/api/whatsapp/contacts');
           this.importLoading = false;
           if (!res) return;
           const all = await res.json();
-          // Filter out already-saved contacts by phone
           const existing = new Set(this.contacts.map(c => c.phone));
           this.importContacts = all.filter(c => !existing.has(c.phone));
         },
 
         toggleImportAll() {
-          const allSelected = this.importContacts.every(c => this.importSelected[c.phone]);
-          this.importContacts.forEach(c => { this.importSelected[c.phone] = !allSelected; });
+          const visible = this.filteredImportContacts;
+          const allSelected = visible.every(c => this.importSelected[c.phone]);
+          visible.forEach(c => { this.importSelected[c.phone] = !allSelected; });
         },
 
         async doImport() {
           const toImport = this.importContacts.filter(c => this.importSelected[c.phone]);
           if (!toImport.length) return;
           this.importStatus = `Importing ${toImport.length} contacts…`;
-          let done = 0;
-          for (const c of toImport) {
-            const res = await this.apiFetch('/api/contacts', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: c.name, phone: c.phone }),
-            });
-            if (res?.ok) done++;
-          }
-          this.importStatus = `✅ Imported ${done} of ${toImport.length} contacts.`;
+          const res = await this.apiFetch('/api/contacts/batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contacts: toImport }),
+          });
+          if (!res) { this.importStatus = '❌ Import failed.'; return; }
+          const data = await res.json();
+          this.importStatus = `✅ Imported ${data.imported} of ${data.total} contacts.`;
           await this.loadContacts();
-          setTimeout(() => { this.showImport = false; this.importStatus = ''; }, 1500);
+          setTimeout(() => { this.showImport = false; this.importStatus = ''; }, 2000);
         },
 
         async logout() {
