@@ -48,12 +48,15 @@ app.use('/api', (req, res, next) => {
 });
 
 // Mount API routers (graceful degradation if files are missing)
+// Routers that use their full path internally (e.g. router.get('/contacts', ...))
+// must be mounted at /api so the full path resolves correctly.
+// Routers that use short paths (e.g. router.get('/login', ...)) keep specific mounts.
 const apiRoutes = [
-  { path: '/api/auth', module: './api/auth', destructure: true },
-  { path: '/api/contacts', module: './api/contacts' },
-  { path: '/api/templates', module: './api/templates' },
-  { path: '/api/schedules', module: './api/schedules', destructure: true },
-  { path: '/api/logs', module: './api/logs' },
+  { path: '/api/auth',     module: './api/auth',      destructure: true },
+  { path: '/api',          module: './api/contacts' },
+  { path: '/api',          module: './api/templates' },
+  { path: '/api',          module: './api/schedules', destructure: true },
+  { path: '/api',          module: './api/logs' },
   { path: '/api/whatsapp', module: './api/whatsapp' },
 ];
 
