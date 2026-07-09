@@ -8,7 +8,16 @@ const router = express.Router();
 // GET /api/logs
 router.get('/logs', (req, res) => {
   const userId = req.session.userId;
-  const { scheduleId, contactId, status } = req.query;
+  const scheduleId = req.query.scheduleId ? parseInt(req.query.scheduleId, 10) : null;
+  const contactId = req.query.contactId ? parseInt(req.query.contactId, 10) : null;
+  const status = req.query.status || null;
+
+  if (req.query.scheduleId && (isNaN(scheduleId) || scheduleId <= 0)) {
+    return res.status(400).json({ error: 'Invalid scheduleId' });
+  }
+  if (req.query.contactId && (isNaN(contactId) || contactId <= 0)) {
+    return res.status(400).json({ error: 'Invalid contactId' });
+  }
 
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
@@ -19,11 +28,11 @@ router.get('/logs', (req, res) => {
 
   if (scheduleId) {
     conditions.push('l.schedule_id = ?');
-    params.push(Number(scheduleId));
+    params.push(scheduleId);
   }
   if (contactId) {
     conditions.push('l.contact_id = ?');
-    params.push(Number(contactId));
+    params.push(contactId);
   }
   if (status && ['sent', 'failed', 'missed'].includes(status)) {
     conditions.push('l.status = ?');

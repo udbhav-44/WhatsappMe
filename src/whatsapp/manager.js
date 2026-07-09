@@ -100,6 +100,7 @@ async function stopSession(userId) {
   const s = sessions[userId];
   if (!s) return;
   if (s.socket) {
+    try { s.socket.ev.removeAllListeners(); } catch (_) {}  // Remove listeners before logout to prevent reconnect loops
     try { await s.socket.logout(); } catch (_) {}
     try { s.socket.end(); } catch (_) {}
   }

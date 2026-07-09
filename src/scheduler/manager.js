@@ -10,6 +10,23 @@ const crons = {};
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
+function estimateNextRun(cronExpr) {
+  const parts = cronExpr.split(' ');
+  const now = Math.floor(Date.now() / 1000);
+  // Interval hours: "0 */H * * *"
+  if (parts[1] && parts[1].startsWith('*/')) {
+    const hours = parseInt(parts[1].slice(2), 10);
+    return isNaN(hours) ? now + 3600 : now + hours * 3600;
+  }
+  // Interval days: "0 0 */D * *"
+  if (parts[2] && parts[2].startsWith('*/')) {
+    const days = parseInt(parts[2].slice(2), 10);
+    return isNaN(days) ? now + 86400 : now + days * 86400;
+  }
+  // Daily or weekly — minimum 23h ahead
+  return now + 23 * 3600;
+}
+
 function getRecipients(schedule) {
   const db = require('../db');
   if (schedule.recipient_type === 'contact') {
@@ -66,9 +83,9 @@ async function fireSchedule(schedule) {
     }
   }
 
-  // Update last_run and clear next_run
-  db.prepare('UPDATE schedules SET last_run = unixepoch(), next_run = NULL WHERE id = ?')
-    .run(schedule.id);
+  // Update last_run and set estimated next_run for missed-message recovery
+  db.prepare('UPDATE schedules SET last_run = unixepoch(), next_run = ? WHERE id = ?')
+    .run(estimateNextRun(schedule.cron_expr), schedule.id);
 }
 
 function logMissed(schedule) {
@@ -129,21 +146,21 @@ async function init() {
 
 async function reload(userId) {
   const db = require('../db');
-
-  // Stop all existing jobs for this user
-  if (crons[userId]) {
-    for (const job of crons[userId].values()) {
-      job.stop();
-    }
-    crons[userId] = new Map();
+  let schedules;
+  try {
+    schedules = db.prepare('SELECT * FROM schedules WHERE user_id=? AND active=1').all(userId);
+  } catch (err) {
+    console.error(`[Scheduler] reload failed for user ${userId} (DB error): ${err.message} — keeping existing jobs`);
+    return;
   }
-
-  // Reload all active schedules for this user from DB
-  const schedules = db.prepare('SELECT * FROM schedules WHERE user_id = ? AND active = 1').all(userId);
+  // Only stop old jobs after successful DB read
+  if (crons[userId]) {
+    for (const job of crons[userId].values()) job.stop();
+  }
+  crons[userId] = new Map();
   for (const schedule of schedules) {
     startJob(schedule);
   }
-
   console.log(`[Scheduler] Reloaded ${schedules.length} active schedule(s) for user ${userId}`);
 }
 

@@ -12,9 +12,19 @@ const loginAttempts = {}; // { userId: { count, lockedUntil } }
 
 // POST /api/auth/login
 router.post('/login', (req, res) => {
-  const { userId, pin } = req.body;
-  if (!userId || !pin) {
+  const userId = parseInt(req.body.userId, 10);
+  if (!userId || isNaN(userId)) return res.status(400).json({ error: 'Invalid userId' });
+  const { pin } = req.body;
+  if (!pin) {
     return res.status(400).json({ error: 'userId and pin are required' });
+  }
+
+  // Evict expired entries if map is large
+  if (Object.keys(loginAttempts).length > 500) {
+    const now = Date.now();
+    for (const k of Object.keys(loginAttempts)) {
+      if ((loginAttempts[k].lockedUntil || 0) < now) delete loginAttempts[k];
+    }
   }
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);

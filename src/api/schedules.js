@@ -208,11 +208,25 @@ router.put('/schedules/:id', (req, res) => {
   if (err) return res.status(400).json({ error: err });
 
   // Merge with existing values
+  const mergedRecipientType = body.recipientType || existing.recipient_type;
+  const mergedRecipientId = body.recipientId !== undefined ? Number(body.recipientId) : existing.recipient_id;
+
+  // Check ownership using EFFECTIVE type, not just body type
+  if (body.recipientId !== undefined) {
+    if (mergedRecipientType === 'contact') {
+      const c = db.prepare('SELECT id FROM contacts WHERE id=? AND user_id=?').get(mergedRecipientId, userId);
+      if (!c) return res.status(400).json({ error: 'Contact not found or does not belong to you' });
+    } else {
+      const g = db.prepare('SELECT id FROM groups WHERE id=? AND user_id=?').get(mergedRecipientId, userId);
+      if (!g) return res.status(400).json({ error: 'Group not found or does not belong to you' });
+    }
+  }
+
   const merged = {
     name: body.name !== undefined ? String(body.name).trim() : existing.name,
     templateId: body.templateId !== undefined ? body.templateId : existing.template_id,
-    recipientType: body.recipientType !== undefined ? body.recipientType : existing.recipient_type,
-    recipientId: body.recipientId !== undefined ? body.recipientId : existing.recipient_id,
+    recipientType: mergedRecipientType,
+    recipientId: mergedRecipientId,
     scheduleType: body.scheduleType,
     timeHour: body.timeHour,
     timeMinute: body.timeMinute,
