@@ -243,9 +243,9 @@
           return s.cron_expr || '—';
         },
 
-        formatTime(iso) {
-          if (!iso) return '—';
-          return new Date(iso).toLocaleString();
+        formatTime(ts) {
+          if (!ts) return '—';
+          return new Date(ts * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
         },
 
         async logout() {

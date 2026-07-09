@@ -224,9 +224,10 @@
           window.scrollTo({ top: 0, behavior: 'smooth' });
         },
 
-        formatTime(iso) {
-          if (!iso) return '—';
-          return new Date(iso).toLocaleString();
+        formatTime(ts) {
+          if (!ts) return '—';
+          // sent_at stored as Unix seconds — multiply by 1000 for JS Date
+          return new Date(ts * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
         },
 
         async logout() {
