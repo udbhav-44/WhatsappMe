@@ -34,8 +34,10 @@ https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
 
 ## Always-on hosting (free)
 
-To run 24/7 without your own computer, deploy to a free Google Cloud VM.
-Step-by-step guide: [deploy/DEPLOY-GCP.md](deploy/DEPLOY-GCP.md).
+To run 24/7 without your own computer, deploy to a free cloud VM:
+
+- **Oracle Cloud (recommended)** — most generous free tier (ARM, up to 4 cores / 24 GB): [deploy/DEPLOY-ORACLE.md](deploy/DEPLOY-ORACLE.md)
+- **Google Cloud** — free e2-micro: [deploy/DEPLOY-GCP.md](deploy/DEPLOY-GCP.md)
 
 ## Autostart on your own computer (runs on login)
 
