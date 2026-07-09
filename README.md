@@ -38,6 +38,7 @@ To run 24/7 without your own computer, deploy to a free cloud VM:
 
 - **Oracle Cloud (recommended)** — most generous free tier (ARM, up to 4 cores / 24 GB): [deploy/DEPLOY-ORACLE.md](deploy/DEPLOY-ORACLE.md)
 - **Google Cloud** — free e2-micro: [deploy/DEPLOY-GCP.md](deploy/DEPLOY-GCP.md)
+- **Any Ubuntu 24.04 box** (home server / mini PC / VM) — Cloudflare Tunnel + custom domain: [deploy/DEPLOY-UBUNTU.md](deploy/DEPLOY-UBUNTU.md)
 
 ## Autostart on your own computer (runs on login)
 
