@@ -37,9 +37,9 @@ router.get('/contacts', (req, res) => {
 });
 
 // POST /api/whatsapp/sync-contacts
-// Forces a fresh app-state re-sync to trigger contacts.upsert
+// Clears cached app-state versions so next reconnect re-downloads all contacts
 router.post('/sync-contacts', async (req, res) => {
-  await waManager.syncContacts(req.session.userId);
+  await waManager.resetAppState(req.session.userId);
   res.json({ ok: true });
 });
 

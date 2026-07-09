@@ -209,9 +209,9 @@
           <div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
             <template x-if="importContacts.length === 0">
               <div style="padding:1rem;color:#666">
-                <p>No contacts loaded yet. WhatsApp syncs contacts on first QR scan. Click below to force a re-sync:</p>
+                <p>No contacts loaded. Click below — WA will reconnect and sync your full contact list (takes ~10s, no QR needed):</p>
                 <button class="btn" style="margin-top:0.75rem" @click="forceSyncContacts()" :disabled="importSyncing">
-                  <span x-text="importSyncing ? 'Syncing… (wait 5s)' : '🔄 Force Sync Contacts'"></span>
+                  <span x-text="importSyncing ? 'Reconnecting & syncing… please wait' : '🔄 Sync Contacts from WhatsApp'"></span>
                 </button>
               </div>
             </template>
@@ -470,8 +470,8 @@
         async forceSyncContacts() {
           this.importSyncing = true;
           await this.apiFetch('/api/whatsapp/sync-contacts', { method: 'POST' });
-          // Wait for Baileys to process the sync (5-10s)
-          for (let i = 0; i < 8; i++) {
+          // Wait for reconnect + full app state re-download (up to 30s)
+          for (let i = 0; i < 15; i++) {
             await new Promise(r => setTimeout(r, 2000));
             const res = await this.apiFetch('/api/whatsapp/contacts');
             if (!res) break;

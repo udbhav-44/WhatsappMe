@@ -129,26 +129,33 @@ function getWAContacts(userId) {
   return Object.values(waContacts[userId] || {});
 }
 
-async function syncContacts(userId) {
-  const s = sessions[userId];
-  if (!s?.socket || !s.connected) {
-    console.log(`[WA] syncContacts: user ${userId} not connected`);
-    return;
-  }
+async function resetAppState(userId) {
+  // Delete app-state-sync-version-*.json files — forces Baileys to re-download
+  // all app state patches on next connect, which fires contacts.upsert with full list
+  const sessionDir = path.join(process.cwd(), 'sessions', `user-${userId}`);
+  console.log(`[WA] User ${userId}: resetting app state to force contact re-sync`);
+
+  // Stop session first
+  await stopSession(userId);
+
+  // Delete only the version files (not creds.json — that would log out the user)
   try {
-    console.log(`[WA] User ${userId}: forcing contact re-sync`);
-    const appStates = ['regular', 'regular_high', 'regular_low', 'critical_block', 'critical_unblock_low'];
-    // Mark dirty so resync downloads fresh data
-    if (typeof s.socket.cleanDirtyBits === 'function') {
-      await Promise.all(appStates.map(a => s.socket.cleanDirtyBits(a).catch(() => {})));
+    const files = fs.readdirSync(sessionDir);
+    for (const f of files) {
+      // Only delete version markers — not keys (deleting keys breaks decryption)
+      if (f.startsWith('app-state-sync-version-')) {
+        fs.unlinkSync(path.join(sessionDir, f));
+      }
     }
-    if (typeof s.socket.resyncAppState === 'function') {
-      await s.socket.resyncAppState(appStates);
-    }
-    console.log(`[WA] User ${userId}: contact sync triggered, contacts so far: ${Object.keys(waContacts[userId] || {}).length}`);
+    console.log(`[WA] User ${userId}: app state cleared — reconnecting`);
   } catch (err) {
-    console.error(`[WA] syncContacts error for user ${userId}:`, err.message);
+    console.error(`[WA] resetAppState error:`, err.message);
   }
+
+  // Reconnect — Baileys will now re-download full state and fire contacts.upsert
+  startSession(userId).catch(err =>
+    console.error(`[WA] Failed to restart session for user ${userId}:`, err.message)
+  );
 }
 
 async function startAllSessions() {
@@ -161,4 +168,4 @@ async function startAllSessions() {
   }
 }
 
-module.exports = { startSession, stopSession, sendText, getStatus, startAllSessions, getWAContacts, syncContacts };
+module.exports = { startSession, stopSession, sendText, getStatus, startAllSessions, getWAContacts, resetAppState };

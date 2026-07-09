@@ -78,7 +78,9 @@
                 <span class="status-dot" :class="waStatus.connected ? 'dot-green' : 'dot-red'"></span>
                 <strong x-text="waStatus.connected ? 'Connected' : 'Disconnected'"></strong>
               </span>
-              <button class="btn btn-sm btn-secondary" x-show="!waStatus.connected" @click="reconnect()">Reconnect</button>
+              <button class="btn btn-sm btn-secondary" x-show="!waStatus.connected" @click="reconnect()" :disabled="reconnecting">
+                <span x-text="reconnecting ? 'Reconnecting…' : 'Reconnect'"></span>
+              </button>
               <button class="btn btn-sm btn-danger" x-show="waStatus.connected" @click="disconnect()">Disconnect WA</button>
             </div>
           </template>
@@ -160,6 +162,7 @@
         logs: [],
         error: '',
         statusLoading: false,
+        reconnecting: false,
         lastRefreshed: '',
         _refreshTimer: null,
 
@@ -196,14 +199,16 @@
         },
 
         async reconnect() {
+          this.reconnecting = true;
           const res = await this.apiFetch('/api/whatsapp/reconnect', { method: 'POST' });
-          if (!res) return;
-          // Poll for QR — Baileys takes 2-5s to emit it
-          for (let i = 0; i < 8; i++) {
-            await new Promise(r => setTimeout(r, 1500));
+          if (!res) { this.reconnecting = false; return; }
+          // Poll up to 20s — if valid creds exist, connects without QR; if expired, shows QR
+          for (let i = 0; i < 20; i++) {
+            await new Promise(r => setTimeout(r, 1000));
             await this.loadStatus();
             if (this.waStatus?.qr || this.waStatus?.connected) break;
           }
+          this.reconnecting = false;
         },
 
         async disconnect() {
