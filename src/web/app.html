@@ -485,20 +485,52 @@
             </div>
           </div>
 
-          <div class="qr-wrap" x-show="!wa.connected && wa.qr" x-cloak>
-            <p>On your phone: WhatsApp &rarr; Settings &rarr; Linked Devices &rarr; Link a Device</p>
-            <img :src="wa.qr" alt="QR code">
+          <!-- method toggle (only while disconnected) -->
+          <div class="seg" style="margin:1rem 0 .4rem" x-show="!wa.connected" x-cloak>
+            <button :class="{ on: connView.mode==='qr' }" @click="connView.mode='qr'">Scan QR</button>
+            <button :class="{ on: connView.mode==='phone' }" @click="connView.mode='phone'">Phone number</button>
           </div>
 
-          <div style="text-align:center;padding:1rem" x-show="!wa.connected && !wa.qr && connView.working">
-            <span class="spinner dark"></span>
-            <div class="hint" style="margin-top:.8rem">Preparing connection…</div>
-          </div>
+          <!-- QR mode -->
+          <template x-if="connView.mode==='qr'">
+            <div>
+              <div class="qr-wrap" x-show="!wa.connected && wa.qr" x-cloak>
+                <p>On your phone: WhatsApp &rarr; Settings &rarr; Linked Devices &rarr; Link a Device</p>
+                <img :src="wa.qr" alt="QR code">
+              </div>
+              <div style="text-align:center;padding:1rem" x-show="!wa.connected && !wa.qr && connView.working" x-cloak>
+                <span class="spinner dark"></span>
+                <div class="hint" style="margin-top:.8rem">Preparing code…</div>
+              </div>
+              <button class="btn btn-block" style="margin-top:1rem" x-show="!wa.connected" @click="reconnect()" :disabled="connView.working">
+                <span x-text="connView.working ? 'Working…' : 'Connect / Refresh code'"></span>
+              </button>
+            </div>
+          </template>
 
-          <div style="display:flex;gap:.6rem;margin-top:1.2rem">
-            <button class="btn btn-block" x-show="!wa.connected" @click="reconnect()" :disabled="connView.working">
-              <span x-text="connView.working ? 'Working…' : 'Connect / Refresh code'"></span>
-            </button>
+          <!-- Phone-number mode -->
+          <template x-if="connView.mode==='phone' && !wa.connected">
+            <div>
+              <div class="pairing-code" x-show="wa.pairingCode" x-cloak style="text-align:center;margin:.6rem 0">
+                <div class="hint" style="margin-bottom:.4rem">On WhatsApp: Settings &rarr; Linked Devices &rarr; Link a device &rarr; <b>Link with phone number</b>, then enter:</div>
+                <div style="font-family:monospace;font-size:1.8rem;letter-spacing:.25rem;font-weight:700" x-text="wa.pairingCode"></div>
+              </div>
+              <template x-if="!wa.pairingCode">
+                <div>
+                  <div class="field">
+                    <label>Your WhatsApp number (with country code)</label>
+                    <input class="input" type="tel" inputmode="numeric" x-model="connView.phone" placeholder="e.g. +91 98765 43210" @keydown.enter="doPair()">
+                  </div>
+                  <div class="form-err" x-show="connView.err" x-text="connView.err"></div>
+                  <button class="btn btn-block" style="margin-top:.4rem" @click="doPair()" :disabled="connView.working">
+                    <span x-text="connView.working ? 'Getting code…' : 'Get pairing code'"></span>
+                  </button>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <div style="margin-top:1.2rem">
             <button class="btn btn-danger btn-block" x-show="wa.connected" @click="disconnect()">Disconnect WhatsApp</button>
           </div>
         </div>
@@ -546,7 +578,7 @@
         loaded: false,
         menuOpen: false,
         toast: '',
-        wa: { connected: false, qr: null },
+        wa: { connected: false, qr: null, pairingCode: null },
         postConnect: false,
         _statusInit: false,
         schedules: [],
@@ -563,7 +595,7 @@
         contactsView: { open: false, mode: 'manage', search: '', adding: false, form: { name: '', phone: '' }, err: '', newGroup: '', openGroup: null, addMemberId: '' },
         importer: { loading: false, syncing: false, list: [], sel: {}, search: '', status: '', msg: '' },
         historyView: { open: false, logs: [], status: '', page: 1, pages: 1 },
-        connView: { open: false, working: false },
+        connView: { open: false, working: false, mode: 'qr', phone: '', err: '' },
         manageView: { open: false, users: [], err: '' },
 
         _waTimer: null,
@@ -910,7 +942,11 @@
         goPage(delta) { this.historyView.page = Math.max(1, this.historyView.page + delta); this.loadLogs(); },
 
         // ---------- connection ----------
-        openConnection() { this.connView.open = true; this.loadStatus(); if (!this.wa.connected) this.reconnect(); },
+        openConnection() {
+          this.connView = { open: true, working: false, mode: 'qr', phone: '', err: '' };
+          this.loadStatus();
+          if (!this.wa.connected) this.reconnect();
+        },
         async loadStatus() {
           const r = await this.apiFetch('/api/whatsapp/status');
           if (!r) return;
@@ -937,6 +973,25 @@
             await new Promise(res => setTimeout(res, 1000));
             await this.loadStatus();
             if (this.wa.qr || this.wa.connected) break;
+          }
+          this.connView.working = false;
+        },
+        async doPair() {
+          if (this.connView.working) return;
+          const digits = (this.connView.phone || '').replace(/\D/g, '');
+          if (digits.length < 8 || digits.length > 15) { this.connView.err = 'Enter your number with country code.'; return; }
+          this.connView.err = ''; this.connView.working = true;
+          this.wa.qr = null; this.wa.pairingCode = null;
+          const r = await this.apiFetch('/api/whatsapp/pair', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone: digits }),
+          });
+          if (!r) { this.connView.working = false; return; }
+          if (!r.ok) { const d = await r.json(); this.connView.err = d.error || 'Could not start pairing.'; this.connView.working = false; return; }
+          for (let i = 0; i < 20; i++) {
+            await new Promise(res => setTimeout(res, 1000));
+            await this.loadStatus();
+            if (this.wa.pairingCode || this.wa.connected) break;
           }
           this.connView.working = false;
         },

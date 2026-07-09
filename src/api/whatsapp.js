@@ -29,6 +29,20 @@ router.post('/reconnect', async (req, res) => {
   res.json({ ok: true });
 });
 
+// POST /api/whatsapp/pair  { phone }
+// Restarts the session in phone-number pairing mode. Poll /status for the
+// 8-char pairingCode to enter in WhatsApp → Linked Devices → Link with phone number.
+router.post('/pair', async (req, res) => {
+  const userId = req.session.userId;
+  const phone = waManager.normalizePairPhone(req.body.phone);
+  if (!phone) {
+    return res.status(400).json({ error: 'Enter a valid phone number with country code' });
+  }
+  await waManager.stopSession(userId);
+  await waManager.startSession(userId, { pairPhone: phone });
+  res.json({ ok: true });
+});
+
 // GET /api/whatsapp/contacts
 // Returns WA contact list synced from WhatsApp (populated after connection)
 router.get('/contacts', (req, res) => {
