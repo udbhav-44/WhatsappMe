@@ -441,14 +441,24 @@
 
         async openImport() {
           this.importLoading = true;
-          this.importStatus = '';
+          this.importStatus = 'Loading contacts from WhatsApp…';
           this.importSelected = {};
           this.importSearch = '';
           this.showImport = true;
-          const res = await this.apiFetch('/api/whatsapp/contacts');
+
+          // Poll up to 15s — contacts.upsert fires async after WA syncs
+          let all = [];
+          for (let i = 0; i < 10; i++) {
+            const res = await this.apiFetch('/api/whatsapp/contacts');
+            if (!res) break;
+            all = await res.json();
+            if (all.length > 0) break;
+            this.importStatus = `Waiting for WhatsApp to sync contacts… (${(i + 1) * 2}s)`;
+            await new Promise(r => setTimeout(r, 2000));
+          }
+
           this.importLoading = false;
-          if (!res) return;
-          const all = await res.json();
+          this.importStatus = '';
           const existing = new Set(this.contacts.map(c => c.phone));
           this.importContacts = all.filter(c => !existing.has(c.phone));
         },

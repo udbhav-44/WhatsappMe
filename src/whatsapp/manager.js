@@ -69,6 +69,11 @@ async function startSession(userId) {
       sessions[userId].connected = true;
       sessions[userId].qr = null;
       console.log(`[WA] User ${userId} connected`);
+      // Trigger app-state sync to populate contacts.upsert
+      if (typeof sock.resyncAppState === 'function') {
+        sock.resyncAppState(['regular', 'regular_high', 'regular_low', 'critical_block', 'critical_unblock_low'])
+          .catch(() => {}); // non-fatal
+      }
     }
     if (connection === 'close') {
       sessions[userId].connected = false;
