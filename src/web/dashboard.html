@@ -78,11 +78,8 @@
                 <span class="status-dot" :class="waStatus.connected ? 'dot-green' : 'dot-red'"></span>
                 <strong x-text="waStatus.connected ? 'Connected' : 'Disconnected'"></strong>
               </span>
-              <button
-                class="btn btn-sm btn-secondary"
-                x-show="!waStatus.connected"
-                @click="reconnect()"
-              >Reconnect</button>
+              <button class="btn btn-sm btn-secondary" x-show="!waStatus.connected" @click="reconnect()">Reconnect</button>
+              <button class="btn btn-sm btn-danger" x-show="waStatus.connected" @click="disconnect()">Disconnect WA</button>
             </div>
           </template>
           <template x-if="!waStatus && !statusLoading">
@@ -207,6 +204,12 @@
             await this.loadStatus();
             if (this.waStatus?.qr || this.waStatus?.connected) break;
           }
+        },
+
+        async disconnect() {
+          if (!confirm('Disconnect WhatsApp? Scheduled messages will not send until you reconnect.')) return;
+          const res = await this.apiFetch('/api/whatsapp/disconnect', { method: 'POST' });
+          if (res) await this.loadStatus();
         },
 
         async loadSchedules() {
