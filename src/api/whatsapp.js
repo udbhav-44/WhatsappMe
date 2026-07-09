@@ -34,6 +34,9 @@ router.post('/reconnect', async (req, res) => {
 // 8-char pairingCode to enter in WhatsApp → Linked Devices → Link with phone number.
 router.post('/pair', async (req, res) => {
   const userId = req.session.userId;
+  if (waManager.getStatus(userId).connected) {
+    return res.status(409).json({ error: 'Already connected. Disconnect first to re-link.' });
+  }
   const phone = waManager.normalizePairPhone(req.body.phone);
   if (!phone) {
     return res.status(400).json({ error: 'Enter a valid phone number with country code' });

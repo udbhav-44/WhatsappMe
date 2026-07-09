@@ -59,10 +59,12 @@ async function startSession(userId, opts = {}) {
   const pairPhone = normalizePairPhone(opts.pairPhone);
   if (pairPhone && !sock.authState.creds.registered) {
     setTimeout(async () => {
-      if (!sessions[userId] || sessions[userId].connected) return;
+      // Guard against a stale timer: this session may have been stopped/replaced
+      // during the delay. Only act if the SAME socket is still current.
+      if (!sessions[userId] || sessions[userId].socket !== sock || sessions[userId].connected) return;
       try {
         const code = await sock.requestPairingCode(pairPhone);
-        if (sessions[userId]) sessions[userId].pairingCode = code;
+        if (sessions[userId] && sessions[userId].socket === sock) sessions[userId].pairingCode = code;
         console.log(`[WA] User ${userId}: pairing code issued`);
       } catch (err) {
         console.error(`[WA] User ${userId}: requestPairingCode failed:`, err.message);
@@ -150,7 +152,12 @@ async function sendText(userId, phone, message) {
 function getStatus(userId) {
   const s = sessions[userId];
   if (!s) return { connected: false };
-  return { connected: s.connected, qr: s.qr || undefined, pairingCode: s.pairingCode || undefined };
+  // While a pairing code is active, suppress the QR so callers never see both.
+  return {
+    connected: s.connected,
+    qr: s.pairingCode ? undefined : (s.qr || undefined),
+    pairingCode: s.pairingCode || undefined,
+  };
 }
 
 function getWAContacts(userId) {
