@@ -64,6 +64,16 @@ function migrate(db) {
       status TEXT NOT NULL CHECK(status IN ('sent','failed','missed'))
     );
   `);
+
+  // Durable login lockout state (survives restarts). Added idempotently so
+  // existing databases pick up the columns.
+  const userCols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+  if (!userCols.includes('failed_attempts')) {
+    db.exec('ALTER TABLE users ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!userCols.includes('locked_until')) {
+    db.exec('ALTER TABLE users ADD COLUMN locked_until INTEGER NOT NULL DEFAULT 0');
+  }
 }
 
 module.exports = { migrate };
