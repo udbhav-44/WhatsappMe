@@ -11,12 +11,19 @@ const sessions = {};
 // WA contacts per user — keyed by phone, persists across reconnects
 const waContacts = {};
 
-async function startSession(userId) {
+// Normalize a phone number for pairing: digits only, international (country
+// code + number, no '+'). Returns null if it doesn't look like a real number.
+function normalizePairPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  return (digits.length >= 8 && digits.length <= 15) ? digits : null;
+}
+
+async function startSession(userId, opts = {}) {
   if (sessions[userId]?.connected) return;
 
   // Also guard against concurrent calls while session is initializing
   if (sessions[userId]?.initializing) return;
-  sessions[userId] = { socket: null, connected: false, qr: null, retrying: false, initializing: true };
+  sessions[userId] = { socket: null, connected: false, qr: null, pairingCode: null, retrying: false, initializing: true };
 
   // Load persisted contacts from disk (survives server restarts)
   const contactsCachePath = path.join(process.cwd(), 'sessions', `user-${userId}`, 'wa-contacts.json');
@@ -47,6 +54,24 @@ async function startSession(userId) {
 
   sock.ev.on('creds.update', saveCreds);
 
+  // Phone-number login: request an 8-char pairing code instead of scanning a QR.
+  // Only when a phone was supplied and this session isn't already registered.
+  const pairPhone = normalizePairPhone(opts.pairPhone);
+  if (pairPhone && !sock.authState.creds.registered) {
+    setTimeout(async () => {
+      // Guard against a stale timer: this session may have been stopped/replaced
+      // during the delay. Only act if the SAME socket is still current.
+      if (!sessions[userId] || sessions[userId].socket !== sock || sessions[userId].connected) return;
+      try {
+        const code = await sock.requestPairingCode(pairPhone);
+        if (sessions[userId] && sessions[userId].socket === sock) sessions[userId].pairingCode = code;
+        console.log(`[WA] User ${userId}: pairing code issued`);
+      } catch (err) {
+        console.error(`[WA] User ${userId}: requestPairingCode failed:`, err.message);
+      }
+    }, 3000); // let the socket establish before requesting (avoids "connection closed")
+  }
+
   sock.ev.on('contacts.upsert', (contacts) => {
     let added = 0;
     for (const c of contacts) {
@@ -72,6 +97,7 @@ async function startSession(userId) {
     if (connection === 'open') {
       sessions[userId].connected = true;
       sessions[userId].qr = null;
+      sessions[userId].pairingCode = null;
       console.log(`[WA] User ${userId} connected`);
       // Trigger app-state sync to populate contacts.upsert
       if (typeof sock.resyncAppState === 'function') {
@@ -126,7 +152,12 @@ async function sendText(userId, phone, message) {
 function getStatus(userId) {
   const s = sessions[userId];
   if (!s) return { connected: false };
-  return { connected: s.connected, qr: s.qr || undefined };
+  // While a pairing code is active, suppress the QR so callers never see both.
+  return {
+    connected: s.connected,
+    qr: s.pairingCode ? undefined : (s.qr || undefined),
+    pairingCode: s.pairingCode || undefined,
+  };
 }
 
 function getWAContacts(userId) {
@@ -176,4 +207,4 @@ async function startAllSessions() {
   }
 }
 
-module.exports = { startSession, stopSession, sendText, getStatus, startAllSessions, getWAContacts, resetAppState };
+module.exports = { startSession, stopSession, sendText, getStatus, startAllSessions, getWAContacts, resetAppState, normalizePairPhone };
