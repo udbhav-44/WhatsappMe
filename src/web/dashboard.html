@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard — WhatsApp Scheduler</title>
+  <script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>
+  <link rel="stylesheet" href="/app.css">
+  <style>
+    .navbar-brand { color: #fff; text-decoration: none; font-weight: 700; font-size: 1.25rem; }
+    .navbar-right { display: flex; align-items: center; gap: 0.75rem; font-size: 0.95rem; }
+    .btn-sm { padding: 0.4rem 0.9rem; font-size: 0.9rem; }
+    .nav-pills { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+    .nav-pill { padding: 0.45rem 1rem; border-radius: 20px; background: #e2e8f0; color: #4a5568; text-decoration: none; font-weight: 600; font-size: 0.9rem; transition: background 0.15s; }
+    .nav-pill:hover, .nav-pill.active { background: #25D366; color: #fff; }
+    .section-title { font-size: 1.15rem; font-weight: 700; color: #075e54; margin-bottom: 0.75rem; }
+    .status-dot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+    .dot-green { background: #25D366; }
+    .dot-red { background: #e53e3e; }
+    .dot-gray { background: #a0aec0; }
+    .wa-status-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 700; }
+    .badge-sent { background: #c6f6d5; color: #276749; }
+    .badge-failed { background: #fed7d7; color: #9b2c2c; }
+    .badge-missed { background: #e2e8f0; color: #4a5568; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+    th { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 2px solid #e2e8f0; color: #4a5568; font-size: 0.85rem; font-weight: 700; }
+    td { padding: 0.6rem 0.75rem; border-bottom: 1px solid #f0f2f5; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    .qr-box { text-align: center; margin-top: 1rem; }
+    .qr-box img { max-width: 220px; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .card { margin-bottom: 1.25rem; cursor: default; }
+    .card:hover { transform: none; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .sched-row { display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0; border-bottom: 1px solid #f0f2f5; }
+    .sched-row:last-child { border-bottom: none; }
+    .text-muted { color: #718096; font-size: 0.9rem; }
+    .empty-state { text-align: center; color: #a0aec0; padding: 1.5rem 0; font-size: 0.95rem; }
+    .refresh-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.75rem; }
+    .small-text { font-size: 0.85rem; color: #a0aec0; }
+  </style>
+</head>
+<body>
+  <div x-data="dashboardApp()" x-init="init()">
+    <nav class="navbar">
+      <a href="/dashboard.html" class="navbar-brand">📅 WA Scheduler</a>
+      <div class="navbar-right">
+        <span x-text="user?.name"></span>
+        <button class="btn btn-sm btn-secondary" @click="logout()">Logout</button>
+      </div>
+    </nav>
+
+    <main class="container" style="max-width:700px">
+      <!-- Nav pills -->
+      <div class="nav-pills">
+        <a href="/dashboard.html" class="nav-pill active">🏠 Dashboard</a>
+        <a href="/contacts.html" class="nav-pill">👥 Contacts</a>
+        <a href="/templates.html" class="nav-pill">📝 Templates</a>
+        <a href="/schedules.html" class="nav-pill">⏰ Schedules</a>
+        <a href="/history.html" class="nav-pill">📜 History</a>
+      </div>
+
+      <!-- WA Connection Status -->
+      <div class="card">
+        <div class="refresh-row">
+          <div class="section-title" style="margin-bottom:0">📱 WhatsApp Status</div>
+          <button class="btn btn-sm" @click="loadStatus()" :disabled="statusLoading">
+            <span class="spinner" x-show="statusLoading" style="border-top-color:#fff"></span>
+            Refresh
+          </button>
+          <span class="small-text" x-text="lastRefreshed ? 'Updated: ' + lastRefreshed : ''"></span>
+        </div>
+
+        <div class="wa-status-row" style="margin-top:1rem">
+          <template x-if="waStatus">
+            <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+              <span>
+                <span class="status-dot" :class="waStatus.connected ? 'dot-green' : 'dot-red'"></span>
+                <strong x-text="waStatus.connected ? 'Connected' : 'Disconnected'"></strong>
+              </span>
+              <button
+                class="btn btn-sm btn-secondary"
+                x-show="!waStatus.connected"
+                @click="reconnect()"
+              >Reconnect</button>
+            </div>
+          </template>
+          <template x-if="!waStatus && !statusLoading">
+            <span class="text-muted">Could not load status</span>
+          </template>
+        </div>
+
+        <div class="qr-box" x-show="waStatus && waStatus.qr">
+          <p class="text-muted" style="margin-bottom:0.5rem">Scan this QR code with WhatsApp on your phone:</p>
+          <img :src="waStatus?.qr" alt="WhatsApp QR Code">
+        </div>
+      </div>
+
+      <!-- Upcoming Schedules -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+          <div class="section-title" style="margin-bottom:0">⏰ Upcoming Schedules</div>
+          <a href="/schedules.html" class="btn btn-sm">Manage</a>
+        </div>
+        <template x-if="schedules.length === 0">
+          <div class="empty-state">No active schedules yet. <a href="/schedules.html">Create one</a></div>
+        </template>
+        <template x-for="s in schedules.slice(0,5)" :key="s.id">
+          <div class="sched-row">
+            <div>
+              <div style="font-weight:600" x-text="s.name"></div>
+              <div class="text-muted" x-text="describeSchedule(s)"></div>
+            </div>
+            <span class="status-dot" :class="s.active ? 'dot-green' : 'dot-gray'" :title="s.active ? 'Active' : 'Paused'"></span>
+          </div>
+        </template>
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="card">
+        <div class="section-title">📋 Recent Activity</div>
+        <template x-if="logs.length === 0">
+          <div class="empty-state">No messages sent yet.</div>
+        </template>
+        <div class="table-wrap" x-show="logs.length > 0">
+          <table>
+            <thead>
+              <tr>
+                <th>Contact / Phone</th>
+                <th>Message</th>
+                <th>Time</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="log in logs" :key="log.id">
+                <tr>
+                  <td x-text="log.phone"></td>
+                  <td x-text="log.message_body ? log.message_body.slice(0,50) + (log.message_body.length > 50 ? '…' : '') : '—'"></td>
+                  <td x-text="formatTime(log.sent_at)" style="white-space:nowrap"></td>
+                  <td>
+                    <span class="badge"
+                      :class="log.status === 'sent' ? 'badge-sent' : log.status === 'failed' ? 'badge-failed' : 'badge-missed'"
+                      x-text="log.status"></span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div x-show="error" class="error-msg" x-text="error"></div>
+    </main>
+  </div>
+
+  <script>
+    function dashboardApp() {
+      return {
+        user: null,
+        waStatus: null,
+        schedules: [],
+        logs: [],
+        error: '',
+        statusLoading: false,
+        lastRefreshed: '',
+        _refreshTimer: null,
+
+        async apiFetch(url, opts = {}) {
+          const res = await fetch(url, { credentials: 'include', ...opts });
+          if (res.status === 401) { window.location.href = '/'; return null; }
+          return res;
+        },
+
+        async init() {
+          const meRes = await this.apiFetch('/api/auth/me');
+          if (!meRes) return;
+          this.user = await meRes.json();
+
+          await Promise.all([this.loadStatus(), this.loadSchedules(), this.loadLogs()]);
+
+          // Auto-refresh WA status every 30s
+          this._refreshTimer = setInterval(() => this.loadStatus(), 30000);
+        },
+
+        async loadStatus() {
+          this.statusLoading = true;
+          try {
+            const res = await this.apiFetch('/api/whatsapp/status');
+            if (!res) return;
+            this.waStatus = await res.json();
+            const now = new Date();
+            this.lastRefreshed = now.toLocaleTimeString();
+          } catch (e) {
+            this.error = 'Could not load WhatsApp status.';
+          } finally {
+            this.statusLoading = false;
+          }
+        },
+
+        async reconnect() {
+          const res = await this.apiFetch('/api/whatsapp/reconnect', { method: 'POST' });
+          if (res) await this.loadStatus();
+        },
+
+        async loadSchedules() {
+          try {
+            const res = await this.apiFetch('/api/schedules');
+            if (!res) return;
+            const data = await res.json();
+            this.schedules = data;
+          } catch (e) { /* ignore */ }
+        },
+
+        async loadLogs() {
+          try {
+            const res = await this.apiFetch('/api/logs?limit=10');
+            if (!res) return;
+            const data = await res.json();
+            this.logs = data.logs || [];
+          } catch (e) { /* ignore */ }
+        },
+
+        describeSchedule(s) {
+          const pad = n => String(n).padStart(2, '0');
+          const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+          if (s.scheduleType === 'daily') {
+            return `Daily at ${pad(s.timeHour)}:${pad(s.timeMinute)}`;
+          }
+          if (s.scheduleType === 'weekly') {
+            const dayNames = (s.days || []).map(d => days[d]).join(', ');
+            return `Weekly on ${dayNames} at ${pad(s.timeHour)}:${pad(s.timeMinute)}`;
+          }
+          if (s.scheduleType === 'interval') {
+            return `Every ${s.intervalValue} ${s.intervalUnit}`;
+          }
+          return s.cron_expr || '—';
+        },
+
+        formatTime(iso) {
+          if (!iso) return '—';
+          return new Date(iso).toLocaleString();
+        },
+
+        async logout() {
+          await this.apiFetch('/api/auth/logout', { method: 'POST' });
+          window.location.href = '/';
+        },
+      };
+    }
+  </script>
+</body>
+</html>
