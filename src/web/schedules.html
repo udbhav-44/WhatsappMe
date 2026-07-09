@@ -177,7 +177,7 @@
             <div x-show="form.scheduleType === 'interval'" style="padding-left:1.5rem">
               <div class="inline-row">
                 <label>Every</label>
-                <input type="number" min="1" x-model.number="form.intervalValue" style="width:70px">
+                <input type="number" min="1" step="1" x-model.number="form.intervalValue" style="width:70px">
                 <select x-model="form.intervalUnit" style="padding:0.4rem 0.5rem;border:2px solid #cbd5e0;border-radius:8px;font-size:1rem">
                   <option value="hours">hours</option>
                   <option value="days">days</option>
@@ -380,7 +380,7 @@
           }
           if (this.form.scheduleType === 'interval') {
             const v = Number(this.form.intervalValue);
-            if (!Number.isInteger(v) || v <= 0) { this.formError = 'Interval must be a positive number.'; return false; }
+            if (!Number.isInteger(v) || v < 1) { this.formError = 'Interval must be a whole number (1 or more).'; return false; }
           }
           return true;
         },

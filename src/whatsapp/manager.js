@@ -15,7 +15,16 @@ async function startSession(userId) {
   if (sessions[userId]?.connected) return;
 
   sessions[userId] = { socket: null, connected: false, qr: null, retrying: false };
-  if (!waContacts[userId]) waContacts[userId] = {};
+
+  // Load persisted contacts from disk (survives server restarts)
+  const contactsCachePath = path.join(process.cwd(), 'sessions', `user-${userId}`, 'wa-contacts.json');
+  if (!waContacts[userId]) {
+    try {
+      waContacts[userId] = JSON.parse(fs.readFileSync(contactsCachePath, 'utf8'));
+    } catch (_) {
+      waContacts[userId] = {};
+    }
+  }
 
   const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } =
     await import('@whiskeysockets/baileys');
@@ -36,12 +45,18 @@ async function startSession(userId) {
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('contacts.upsert', (contacts) => {
+    let changed = false;
     for (const c of contacts) {
       if (!c.id || !c.id.endsWith('@s.whatsapp.net')) continue;
       const name = c.notify || c.name || c.verifiedName || '';
       if (!name) continue;
       const phone = '+' + c.id.replace('@s.whatsapp.net', '');
       waContacts[userId][phone] = { name, phone };
+      changed = true;
+    }
+    // Persist to disk so contacts survive server restarts
+    if (changed) {
+      try { fs.writeFileSync(contactsCachePath, JSON.stringify(waContacts[userId])); } catch (_) {}
     }
   });
 
