@@ -52,7 +52,7 @@ const apiRoutes = [
   { path: '/api/auth', module: './api/auth', destructure: true },
   { path: '/api/contacts', module: './api/contacts' },
   { path: '/api/templates', module: './api/templates' },
-  { path: '/api/schedules', module: './api/schedules' },
+  { path: '/api/schedules', module: './api/schedules', destructure: true },
   { path: '/api/logs', module: './api/logs' },
   { path: '/api/whatsapp', module: './api/whatsapp' },
 ];
