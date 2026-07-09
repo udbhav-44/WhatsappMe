@@ -136,7 +136,8 @@ function fromCron(cronExpr, scheduleType) {
 function validateScheduleBody(body, userId, skipRequired = false) {
   const {
     name, templateId, recipientType, recipientId,
-    scheduleType, timeHour, timeMinute, days, intervalValue, intervalUnit,
+    scheduleType, timeHour, timeMinute, days,
+    intervalValue, intervalUnit, windowStart, windowEnd,
   } = body;
 
   if (!skipRequired) {
@@ -184,10 +185,28 @@ function validateScheduleBody(body, userId, skipRequired = false) {
       if (days.some(d => !Number.isInteger(d) || d < 0 || d > 6)) return 'days entries must be 0-6';
     }
     if (scheduleType === 'interval') {
-      if (!intervalValue || !Number.isInteger(Number(intervalValue)) || Number(intervalValue) <= 0) {
-        return 'intervalValue must be a positive integer';
+      if (!['minutes', 'hours', 'days'].includes(intervalUnit)) {
+        return 'intervalUnit must be minutes, hours, or days';
       }
-      if (!['hours', 'days'].includes(intervalUnit)) return 'intervalUnit must be hours or days';
+      const iv = Number(intervalValue);
+      if (intervalUnit === 'minutes') {
+        if (![5, 10, 15, 20, 30].includes(iv)) return 'minutes interval must be one of 5, 10, 15, 20, 30';
+      } else if (intervalUnit === 'hours') {
+        if (!Number.isInteger(iv) || iv < 1 || iv > 23) return 'hours interval must be 1-23';
+      } else {
+        if (!Number.isInteger(iv) || iv <= 0) return 'intervalValue must be a positive integer';
+      }
+      if (intervalUnit === 'minutes' || intervalUnit === 'hours') {
+        const ws = windowStart === undefined ? 0 : Number(windowStart);
+        const we = windowEnd === undefined ? 23 : Number(windowEnd);
+        if (!Number.isInteger(ws) || ws < 0 || ws > 23) return 'windowStart must be 0-23';
+        if (!Number.isInteger(we) || we < 0 || we > 23) return 'windowEnd must be 0-23';
+        if (we < ws) return 'windowEnd must be >= windowStart';
+      }
+      if (days !== undefined && days !== null) {
+        if (!Array.isArray(days)) return 'days must be an array';
+        if (days.some(d => !Number.isInteger(d) || d < 0 || d > 6)) return 'days entries must be 0-6';
+      }
     }
   }
 
@@ -291,6 +310,8 @@ router.put('/schedules/:id', (req, res) => {
     timeHour: body.timeHour,
     timeMinute: body.timeMinute,
     days: body.days,
+    windowStart: body.windowStart,
+    windowEnd: body.windowEnd,
     intervalValue: body.intervalValue,
     intervalUnit: body.intervalUnit,
   };
@@ -347,4 +368,4 @@ router.patch('/schedules/:id/toggle', (req, res) => {
   return res.json(schedule);
 });
 
-module.exports = { router, toCron, fromCron, detectScheduleType };
+module.exports = { router, toCron, fromCron, detectScheduleType, validateScheduleBody };
