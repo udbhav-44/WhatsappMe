@@ -1,0 +1,6 @@
+node_modules/
+sessions/
+data/
+.env
+*.log
+.superpowers/
