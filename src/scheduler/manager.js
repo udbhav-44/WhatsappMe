@@ -84,7 +84,8 @@ function jitterMaxSeconds(cronExpr) {
   if (!Number.isFinite(mins) || mins <= 0) return 0;
   const base = mins * 60;
   const iv = intervalSeconds(cronExpr);
-  if (iv >= 86400) return Math.round(base);
+  // Cap to under half the interval (−30s buffer) so windows never overlap/reorder.
+  // Applies to daily/weekly too, guarding against an absurd JITTER_MINUTES.
   const cap = Math.max(0, Math.floor(iv / 2) - 30);
   return Math.round(Math.min(base, cap));
 }
