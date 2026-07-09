@@ -8,6 +8,10 @@ const path = require('path');
 // Trigger DB migration on startup
 require('./db/index');
 
+// Start WhatsApp sessions for all existing users
+const waManager = require('./whatsapp/manager');
+waManager.startAllSessions().catch(console.error);
+
 const app = express();
 
 // Session store
