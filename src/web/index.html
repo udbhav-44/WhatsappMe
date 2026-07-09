@@ -93,10 +93,10 @@
       <template x-if="mode === 'adduser'">
         <div style="text-align:left">
           <h2 style="font-size:1.4rem;text-align:center">Add a person</h2>
-          <p class="tagline" style="text-align:center;margin:.4rem 0 1.5rem">You must be signed in already to add another.</p>
+          <p class="tagline" style="text-align:center;margin:.4rem 0 1.5rem">Enter the invite code from the owner to create your own account.</p>
           <div class="field">
             <label>Name</label>
-            <input class="input" type="text" x-model="form.name" placeholder="e.g. Dad" @keydown.enter="doAddUser()">
+            <input class="input" type="text" x-model="form.name" placeholder="e.g. Dad" @keydown.enter="doSignup()">
           </div>
           <div class="field">
             <label>4-digit PIN</label>
@@ -108,10 +108,14 @@
               </template>
             </div>
           </div>
+          <div class="field">
+            <label>Invite code</label>
+            <input class="input" type="text" x-model="form.code" placeholder="Ask the owner" @keydown.enter="doSignup()">
+          </div>
           <div class="err" x-show="error" x-text="error"></div>
           <div style="display:flex;gap:.6rem;margin-top:.5rem">
             <button class="btn btn-ghost btn-block" @click="mode='users'; error=''">Cancel</button>
-            <button class="btn btn-block" @click="doAddUser()" :disabled="loading">
+            <button class="btn btn-block" @click="doSignup()" :disabled="loading">
               <span x-text="loading ? 'Adding…' : 'Add'"></span>
             </button>
           </div>
@@ -128,7 +132,7 @@
         users: [],
         selected: null,
         pin: ['', '', '', ''],
-        form: { name: '', pin: ['', '', '', ''] },
+        form: { name: '', pin: ['', '', '', ''], code: '' },
         loading: false,
         error: '',
 
@@ -148,7 +152,7 @@
           }
         },
 
-        resetForm() { this.form = { name: '', pin: ['', '', '', ''] }; this.error = ''; },
+        resetForm() { this.form = { name: '', pin: ['', '', '', ''], code: '' }; this.error = ''; },
 
         pick(u) {
           this.selected = u;
@@ -225,22 +229,26 @@
           finally { this.loading = false; }
         },
 
-        async doAddUser() {
+        async doSignup() {
           if (this.loading) return;
           const name = this.form.name.trim();
           const pin = this.form.pin.join('');
+          const code = (this.form.code || '').trim();
           if (!name) { this.error = 'Please enter a name.'; return; }
           if (!/^\d{4}$/.test(pin)) { this.error = 'Please enter a 4-digit PIN.'; return; }
+          if (!code) { this.error = 'Enter the invite code.'; return; }
           this.loading = true; this.error = '';
           try {
-            const res = await fetch('/api/auth/users', {
+            const res = await fetch('/api/auth/signup', {
               method: 'POST', credentials: 'include',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name, pin }),
+              body: JSON.stringify({ name, pin, code }),
             });
             const d = await res.json();
-            if (res.ok && d.ok) { this.resetForm(); await this.init(); this.mode = 'users'; }
-            else if (res.status === 401) { this.error = 'Sign in first, then add another person from Settings.'; }
+            if (res.ok && d.ok) { window.location.href = '/app.html'; return; } // signup auto-logs in
+            else if (res.status === 403) { this.error = 'Signup is turned off. Ask the owner to add you.'; }
+            else if (res.status === 429) { this.error = 'Too many tries. Wait a bit and retry.'; }
+            else if (res.status === 401) { this.error = 'Wrong invite code.'; }
             else { this.error = d.error || 'Could not add.'; }
           } catch (e) { this.error = 'Network error.'; }
           finally { this.loading = false; }

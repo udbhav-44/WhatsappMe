@@ -40,6 +40,19 @@ To run 24/7 without your own computer, deploy to a free cloud VM:
 - **Google Cloud** — free e2-micro: [deploy/DEPLOY-GCP.md](deploy/DEPLOY-GCP.md)
 - **Any Ubuntu 24.04 box** (home server / mini PC / VM) — Cloudflare Tunnel + custom domain: [deploy/DEPLOY-UBUNTU.md](deploy/DEPLOY-UBUNTU.md)
 
+## Adding family members (invite code)
+
+The first account is created on first run. After that, new people can create
+their own account **only if you set a shared invite code** — otherwise signup is
+off (so a public URL can't be used by strangers).
+
+1. Put a code in `.env`: `SIGNUP_CODE=some-family-word`
+2. Restart the app.
+3. Tell the person: open the URL → **Add person** → their name + a PIN they pick
+   + the invite code → they're in (auto signed-in). No password sharing.
+
+Leave `SIGNUP_CODE` unset to keep signup disabled.
+
 ## Autostart on your own computer (runs on login)
 
 ```

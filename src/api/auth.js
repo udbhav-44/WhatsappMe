@@ -109,6 +109,55 @@ router.post('/setup', (req, res) => {
   return res.status(201).json({ ok: true, user: { id: user.id, name: user.name } });
 });
 
+// Pure gate for self-signup — decides the response without touching db/session.
+// Returns { status, ok?, error?, attempts } where attempts is the next throttle state.
+function evaluateSignup({ envCode, providedCode, name, pin, attempts, now }) {
+  const code = (envCode || '').trim();
+  if (!code) return { status: 403, error: 'Signup is disabled', attempts };
+  if (attempts.lockedUntil > now) {
+    return { status: 429, error: 'Too many attempts. Try again later.', attempts };
+  }
+  if ((providedCode || '').toString().trim() !== code) {
+    const count = attempts.count + 1;
+    const next = count >= 10
+      ? { count: 0, lockedUntil: now + 15 * 60 * 1000 }
+      : { count, lockedUntil: attempts.lockedUntil };
+    return { status: 401, error: 'Wrong invite code', attempts: next };
+  }
+  const reset = { count: 0, lockedUntil: 0 };
+  if (!name || !String(name).trim()) return { status: 400, error: 'name is required', attempts: reset };
+  if (!pin || !/^\d{4}$/.test(String(pin))) return { status: 400, error: 'pin must be exactly 4 digits', attempts: reset };
+  return { status: 201, ok: true, attempts: reset };
+}
+
+// In-memory throttle for signup-code attempts (global bucket — no user yet)
+let signupAttempts = { count: 0, lockedUntil: 0 };
+
+// POST /api/auth/signup — public self-signup gated by a shared invite code
+router.post('/signup', (req, res) => {
+  const result = evaluateSignup({
+    envCode: process.env.SIGNUP_CODE,
+    providedCode: req.body.code,
+    name: req.body.name,
+    pin: req.body.pin,
+    attempts: signupAttempts,
+    now: Date.now(),
+  });
+  signupAttempts = result.attempts;
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+
+  const pin_hash = bcrypt.hashSync(String(req.body.pin), 10);
+  const info = db.prepare('INSERT INTO users (name, pin_hash, session_dir) VALUES (?, ?, ?)').run(
+    String(req.body.name).trim(), pin_hash, ''
+  );
+  const id = info.lastInsertRowid;
+  db.prepare('UPDATE users SET session_dir = ? WHERE id = ?').run(`sessions/user-${id}`, id);
+
+  req.session.userId = id; // auto-login the new user
+  const user = db.prepare('SELECT id, name FROM users WHERE id = ?').get(id);
+  return res.status(201).json({ ok: true, user: { id: user.id, name: user.name } });
+});
+
 // POST /api/auth/users — create additional user (must be logged in)
 router.post('/users', authMiddleware, async (req, res) => {
   const { name, pin } = req.body;
@@ -133,4 +182,4 @@ function authMiddleware(req, res, next) {
   res.status(401).json({ error: 'Not authenticated' });
 }
 
-module.exports = { router, authMiddleware };
+module.exports = { router, authMiddleware, evaluateSignup };
