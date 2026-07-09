@@ -200,7 +200,13 @@
 
         async reconnect() {
           const res = await this.apiFetch('/api/whatsapp/reconnect', { method: 'POST' });
-          if (res) await this.loadStatus();
+          if (!res) return;
+          // Poll for QR — Baileys takes 2-5s to emit it
+          for (let i = 0; i < 8; i++) {
+            await new Promise(r => setTimeout(r, 1500));
+            await this.loadStatus();
+            if (this.waStatus?.qr || this.waStatus?.connected) break;
+          }
         },
 
         async loadSchedules() {
