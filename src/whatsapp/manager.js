@@ -6,19 +6,15 @@ const fs = require('fs');
 const qrcode = require('qrcode');
 
 // In-memory state per user session
-// sessions[userId] = { socket: null, connected: false, qr: null, retrying: false }
+// sessions[userId] = { socket: null, store: null, connected: false, qr: null, retrying: false }
 const sessions = {};
-
-// WA contact list per user (populated on contacts.upsert event)
-// waContacts[userId] = [{ name, phone }]
-const waContacts = {};
 
 async function startSession(userId) {
   if (sessions[userId]?.connected) return; // already connected
 
-  sessions[userId] = { socket: null, connected: false, qr: null, retrying: false };
+  sessions[userId] = { socket: null, store: null, connected: false, qr: null, retrying: false };
 
-  const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } =
+  const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeInMemoryStore } =
     await import('@whiskeysockets/baileys');
 
   const sessionDir = path.join(process.cwd(), 'sessions', `user-${userId}`);
@@ -26,29 +22,19 @@ async function startSession(userId) {
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
 
+  const store = makeInMemoryStore({});
+
   const sock = makeWASocket({
     auth: state,
-    printQRInTerminal: false, // we handle QR ourselves
-    logger: require('pino')({ level: 'silent' }), // suppress Baileys logs
+    printQRInTerminal: false,
+    logger: require('pino')({ level: 'silent' }),
   });
 
+  store.bind(sock.ev);
   sessions[userId].socket = sock;
+  sessions[userId].store = store;
 
   sock.ev.on('creds.update', saveCreds);
-
-  sock.ev.on('contacts.upsert', (contacts) => {
-    if (!waContacts[userId]) waContacts[userId] = [];
-    for (const c of contacts) {
-      if (!c.id || !c.id.endsWith('@s.whatsapp.net')) continue; // skip groups
-      const phone = '+' + c.id.replace('@s.whatsapp.net', '');
-      const name = c.notify || c.name || c.verifiedName || '';
-      if (!name) continue; // skip nameless entries
-      // upsert by phone
-      const existing = waContacts[userId].findIndex(x => x.phone === phone);
-      if (existing >= 0) waContacts[userId][existing] = { name, phone };
-      else waContacts[userId].push({ name, phone });
-    }
-  });
 
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
     if (qr) {
@@ -124,7 +110,15 @@ async function startAllSessions() {
 }
 
 function getWAContacts(userId) {
-  return waContacts[userId] || [];
+  const store = sessions[userId]?.store;
+  if (!store) return [];
+  return Object.values(store.contacts)
+    .filter(c => c.id && c.id.endsWith('@s.whatsapp.net'))
+    .map(c => ({
+      name: c.notify || c.name || c.verifiedName || '',
+      phone: '+' + c.id.replace('@s.whatsapp.net', ''),
+    }))
+    .filter(c => c.name); // drop nameless entries
 }
 
 module.exports = { startSession, stopSession, sendText, getStatus, startAllSessions, getWAContacts };
