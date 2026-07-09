@@ -48,7 +48,11 @@ async function startSession(userId) {
       const code = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = code !== DisconnectReason.loggedOut;
       console.log(`[WA] User ${userId} disconnected (code ${code}), reconnect=${shouldReconnect}`);
-      if (shouldReconnect && !sessions[userId].retrying) {
+      if (!shouldReconnect) {
+        // Logged out — clear stale session files so next startSession shows QR
+        try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (_) {}
+        console.log(`[WA] User ${userId} session cleared — open dashboard to scan QR`);
+      } else if (!sessions[userId].retrying) {
         sessions[userId].retrying = true;
         setTimeout(() => {
           if (!sessions[userId]) return;
