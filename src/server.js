@@ -35,17 +35,15 @@ app.use(express.json());
 // Serve static files from src/web/
 app.use(express.static(path.join(__dirname, 'web')));
 
-// Auth middleware — protects all /api/* except /api/auth/* and /api/setup
-let authMiddleware;
-try {
-  ({ authMiddleware } = require('./api/auth'));
-} catch (err) {
-  console.warn(`Warning: could not load authMiddleware: ${err.message}`);
-  authMiddleware = (req, res, next) => next();
+if (!process.env.SESSION_SECRET) {
+  console.warn('[WARN] SESSION_SECRET not set — using default. Set it in .env for security.');
 }
 
+// Auth middleware — protects all /api/* except /api/auth/*
+const { router: authRouter, authMiddleware } = require('./api/auth');
+
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/auth') || req.path.startsWith('/setup')) return next();
+  if (req.path.startsWith('/auth')) return next();
   authMiddleware(req, res, next);
 });
 

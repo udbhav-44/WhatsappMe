@@ -51,6 +51,7 @@ async function startSession(userId) {
       if (shouldReconnect && !sessions[userId].retrying) {
         sessions[userId].retrying = true;
         setTimeout(() => {
+          if (!sessions[userId]) return;
           sessions[userId].retrying = false;
           startSession(userId); // reconnect
         }, 5000);

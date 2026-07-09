@@ -23,7 +23,9 @@ router.post('/disconnect', async (req, res) => {
 // POST /api/whatsapp/reconnect
 // Starts (or restarts) the current user's WhatsApp session
 router.post('/reconnect', async (req, res) => {
-  await waManager.startSession(req.session.userId);
+  const userId = req.session.userId;
+  await waManager.stopSession(userId);
+  await waManager.startSession(userId);
   res.json({ ok: true });
 });
 

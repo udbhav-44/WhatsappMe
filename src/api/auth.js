@@ -7,6 +7,9 @@ const db = require('../db');
 
 const router = express.Router();
 
+// In-memory rate limiter for login attempts
+const loginAttempts = {}; // { userId: { count, lockedUntil } }
+
 // POST /api/auth/login
 router.post('/login', (req, res) => {
   const { userId, pin } = req.body;
@@ -19,11 +22,23 @@ router.post('/login', (req, res) => {
     return res.status(404).json({ error: 'User not found' });
   }
 
+  const attempts = loginAttempts[userId] || { count: 0, lockedUntil: 0 };
+  if (attempts.lockedUntil > Date.now()) {
+    return res.status(429).json({ error: 'Too many attempts. Try again later.' });
+  }
+
   const match = bcrypt.compareSync(String(pin), user.pin_hash);
   if (!match) {
+    attempts.count = (attempts.count || 0) + 1;
+    if (attempts.count >= 5) {
+      attempts.lockedUntil = Date.now() + 30 * 60 * 1000; // 30 min lockout
+      attempts.count = 0;
+    }
+    loginAttempts[userId] = attempts;
     return res.status(401).json({ error: 'Invalid PIN' });
   }
 
+  delete loginAttempts[userId];
   req.session.userId = user.id;
   return res.status(200).json({ ok: true, user: { id: user.id, name: user.name } });
 });
@@ -82,6 +97,24 @@ router.post('/setup', (req, res) => {
 
   const user = db.prepare('SELECT id, name FROM users WHERE id = ?').get(id);
   return res.status(201).json({ ok: true, user: { id: user.id, name: user.name } });
+});
+
+// POST /api/auth/users — create additional user (must be logged in)
+router.post('/users', authMiddleware, async (req, res) => {
+  const { name, pin } = req.body;
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'Name required' });
+  }
+  if (!pin || !/^\d{4}$/.test(pin)) {
+    return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
+  }
+  const pin_hash = bcrypt.hashSync(pin.toString(), 10);
+  const result = db.prepare('INSERT INTO users (name, pin_hash, session_dir) VALUES (?, ?, ?)').run(
+    name.trim(), pin_hash, ''
+  );
+  const newId = result.lastInsertRowid;
+  db.prepare('UPDATE users SET session_dir = ? WHERE id = ?').run(`sessions/user-${newId}`, newId);
+  res.status(201).json({ ok: true, user: { id: newId, name: name.trim() } });
 });
 
 // Auth middleware — applied in server.js to protect /api/* except /api/auth/*
