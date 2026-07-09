@@ -40,7 +40,7 @@ if (!process.env.SESSION_SECRET) {
 }
 
 // Auth middleware — protects all /api/* except /api/auth/*
-const { router: authRouter, authMiddleware } = require('./api/auth');
+const { authMiddleware } = require('./api/auth');
 
 app.use('/api', (req, res, next) => {
   if (req.path.startsWith('/auth')) return next();
