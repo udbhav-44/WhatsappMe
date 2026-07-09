@@ -98,14 +98,44 @@
 
       <div class="card-grid">
         <template x-for="user in users" :key="user.id">
-          <div
-            class="card user-card"
-            @click="selectUser(user)"
-          >
+          <div class="card user-card" @click="selectUser(user)">
             <div class="avatar" x-text="user.name.charAt(0).toUpperCase()"></div>
             <div class="user-name" x-text="user.name"></div>
           </div>
         </template>
+        <!-- Add User card -->
+        <div class="card user-card" style="border:2px dashed #cbd5e0;background:#f8fafc" @click="mode='adduser'">
+          <div class="avatar" style="background:#94a3b8;font-size:1.8rem">+</div>
+          <div class="user-name" style="color:#64748b">Add User</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add User form -->
+    <div class="container" x-show="mode === 'adduser'">
+      <h1 class="page-title">Add New User</h1>
+      <p class="page-subtitle">Must be logged in as an existing user to add another.</p>
+      <div class="form-group">
+        <label>Name</label>
+        <input class="input" type="text" placeholder="e.g. Dad" x-model="addName">
+      </div>
+      <div class="form-group">
+        <label>4-digit PIN</label>
+        <div class="pin-row">
+          <template x-for="(_, i) in [0,1,2,3]" :key="i">
+            <input class="input-pin" type="text" inputmode="numeric" maxlength="1"
+              :id="'add-pin-' + i" x-model="addPin[i]"
+              @input="onPinInput($event, i, 'add-pin-')"
+              @keydown="onPinKeydown($event, i, 'add-pin-')">
+          </template>
+        </div>
+      </div>
+      <div class="error-msg" x-text="error" x-show="error"></div>
+      <div style="display:flex;gap:0.75rem;margin-top:1rem">
+        <button class="btn w-full" @click="doAddUser()" :disabled="loading">
+          <span x-text="loading ? 'Adding…' : 'Add User'"></span>
+        </button>
+        <button class="btn w-full" style="background:#94a3b8" @click="mode='users';error=''">Cancel</button>
       </div>
     </div>
 
@@ -155,12 +185,14 @@
   <script>
     function loginApp() {
       return {
-        mode: 'users',      // 'users' | 'pin' | 'setup'
+        mode: 'users',      // 'users' | 'pin' | 'setup' | 'adduser'
         users: [],
         selectedUser: null,
         loginPin: ['', '', '', ''],
         setupPin: ['', '', '', ''],
         setupName: '',
+        addPin: ['', '', '', ''],
+        addName: '',
         error: '',
         loading: false,
 
@@ -314,6 +346,40 @@
             }
           } catch (e) {
             this.error = 'Network error. Please try again.';
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        async doAddUser() {
+          if (this.loading) return;
+          const name = this.addName.trim();
+          const pin = this.addPin.join('');
+          if (!name) { this.error = 'Please enter a name.'; return; }
+          if (!/^\d{4}$/.test(pin)) { this.error = 'Please enter a 4-digit PIN.'; return; }
+          this.error = '';
+          this.loading = true;
+          try {
+            // POST /api/auth/users requires being logged in
+            const res = await fetch('/api/auth/users', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name, pin }),
+            });
+            const data = await res.json();
+            if (res.ok && data.ok) {
+              this.addName = '';
+              this.addPin = ['', '', '', ''];
+              await this.init();  // reload user list
+              this.mode = 'users';
+            } else if (res.status === 401) {
+              this.error = 'You must be logged in to add a user. Log in first, then come back to add another user.';
+            } else {
+              this.error = data.error || 'Failed to add user.';
+            }
+          } catch (e) {
+            this.error = 'Network error.';
           } finally {
             this.loading = false;
           }
