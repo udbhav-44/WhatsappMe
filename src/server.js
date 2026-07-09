@@ -27,9 +27,23 @@ app.use(express.json());
 // Serve static files from src/web/
 app.use(express.static(path.join(__dirname, 'web')));
 
+// Auth middleware — protects all /api/* except /api/auth/* and /api/setup
+let authMiddleware;
+try {
+  ({ authMiddleware } = require('./api/auth'));
+} catch (err) {
+  console.warn(`Warning: could not load authMiddleware: ${err.message}`);
+  authMiddleware = (req, res, next) => next();
+}
+
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/auth') || req.path.startsWith('/setup')) return next();
+  authMiddleware(req, res, next);
+});
+
 // Mount API routers (graceful degradation if files are missing)
 const apiRoutes = [
-  { path: '/api/auth', module: './api/auth' },
+  { path: '/api/auth', module: './api/auth', destructure: true },
   { path: '/api/contacts', module: './api/contacts' },
   { path: '/api/templates', module: './api/templates' },
   { path: '/api/schedules', module: './api/schedules' },
@@ -39,8 +53,11 @@ const apiRoutes = [
 
 for (const route of apiRoutes) {
   try {
-    const router = require(route.module);
-    app.use(route.path, router);
+    let mod = require(route.module);
+    if (route.destructure) {
+      mod = mod.router;
+    }
+    app.use(route.path, mod);
   } catch (err) {
     console.warn(`Warning: router not found for ${route.path} (${route.module}): ${err.message}`);
   }

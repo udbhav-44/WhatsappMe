@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WhatsApp Scheduler</title>
+  <script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>
+  <link rel="stylesheet" href="/app.css">
+  <style>
+    .user-card {
+      text-align: center;
+      padding: 2rem 1rem;
+    }
+    .user-card .avatar {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: #25D366;
+      color: #fff;
+      font-size: 1.8rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 0.75rem;
+    }
+    .user-card .user-name {
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div
+    x-data="loginApp()"
+    x-init="init()"
+  >
+    <!-- Navbar -->
+    <nav class="navbar">
+      <span class="app-title">📱 WhatsApp Scheduler</span>
+    </nav>
+
+    <!-- First-run setup form -->
+    <div class="container" x-show="mode === 'setup'">
+      <h1 class="page-title">Welcome!</h1>
+      <p class="page-subtitle">Set up your account to get started.</p>
+
+      <div class="card">
+        <h2 style="margin-bottom:1.25rem;">Create Account</h2>
+
+        <div class="form-group">
+          <label for="setup-name">Your Name</label>
+          <input
+            id="setup-name"
+            class="input"
+            type="text"
+            placeholder="e.g. Dad"
+            x-model="setupName"
+            @keydown.enter="doSetup()"
+          >
+        </div>
+
+        <div class="form-group">
+          <label>Choose a 4-digit PIN</label>
+          <div class="pin-row">
+            <template x-for="(_, i) in [0,1,2,3]" :key="i">
+              <input
+                class="input-pin"
+                type="text"
+                inputmode="numeric"
+                maxlength="1"
+                :id="'setup-pin-' + i"
+                x-model="setupPin[i]"
+                @input="onPinInput($event, i, 'setup-pin-')"
+                @keydown="onPinKeydown($event, i, 'setup-pin-')"
+              >
+            </template>
+          </div>
+        </div>
+
+        <div class="error-msg" x-text="error" x-show="error"></div>
+
+        <button
+          class="btn w-full mt-2"
+          @click="doSetup()"
+          :disabled="loading"
+        >
+          <span class="spinner" x-show="loading"></span>
+          <span x-text="loading ? 'Setting up…' : 'Create Account'"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- User card grid -->
+    <div class="container" x-show="mode === 'users'">
+      <h1 class="page-title">Who's logging in?</h1>
+      <p class="page-subtitle">Tap your name to continue.</p>
+
+      <div class="card-grid">
+        <template x-for="user in users" :key="user.id">
+          <div
+            class="card user-card"
+            @click="selectUser(user)"
+          >
+            <div class="avatar" x-text="user.name.charAt(0).toUpperCase()"></div>
+            <div class="user-name" x-text="user.name"></div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- PIN entry modal -->
+    <div class="modal-overlay" x-show="mode === 'pin'" x-cloak>
+      <div class="modal">
+        <h2 x-text="'Hello, ' + (selectedUser ? selectedUser.name : '') + '!'"></h2>
+        <p class="subtitle">Enter your 4-digit PIN</p>
+
+        <div class="pin-row">
+          <template x-for="(_, i) in [0,1,2,3]" :key="i">
+            <input
+              class="input-pin"
+              type="text"
+              inputmode="numeric"
+              maxlength="1"
+              :id="'login-pin-' + i"
+              x-model="loginPin[i]"
+              @input="onPinInput($event, i, 'login-pin-')"
+              @keydown="onPinKeydown($event, i, 'login-pin-')"
+            >
+          </template>
+        </div>
+
+        <div class="error-msg" x-text="error" x-show="error"></div>
+
+        <button
+          class="btn w-full"
+          @click="doLogin()"
+          :disabled="loading"
+        >
+          <span class="spinner" x-show="loading"></span>
+          <span x-text="loading ? 'Checking…' : 'Log In'"></span>
+        </button>
+
+        <button
+          class="btn btn-secondary w-full mt-2"
+          @click="cancelPin()"
+          :disabled="loading"
+        >
+          Back
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function loginApp() {
+      return {
+        mode: 'users',      // 'users' | 'pin' | 'setup'
+        users: [],
+        selectedUser: null,
+        loginPin: ['', '', '', ''],
+        setupPin: ['', '', '', ''],
+        setupName: '',
+        error: '',
+        loading: false,
+
+        async init() {
+          try {
+            const res = await fetch('/api/auth/users');
+            const data = await res.json();
+            if (data.length === 0) {
+              this.mode = 'setup';
+            } else {
+              this.users = data;
+              this.mode = 'users';
+            }
+          } catch (e) {
+            this.error = 'Could not load users. Is the server running?';
+          }
+        },
+
+        selectUser(user) {
+          this.selectedUser = user;
+          this.loginPin = ['', '', '', ''];
+          this.error = '';
+          this.mode = 'pin';
+          // Focus first PIN input after modal renders
+          this.$nextTick(() => {
+            const el = document.getElementById('login-pin-0');
+            if (el) el.focus();
+          });
+        },
+
+        cancelPin() {
+          this.mode = 'users';
+          this.selectedUser = null;
+          this.loginPin = ['', '', '', ''];
+          this.error = '';
+        },
+
+        onPinInput(event, index, prefix) {
+          const val = event.target.value.replace(/\D/g, '');
+          event.target.value = val.slice(-1);
+          if (prefix === 'login-pin-') {
+            this.loginPin[index] = event.target.value;
+          } else {
+            this.setupPin[index] = event.target.value;
+          }
+          // Auto-advance
+          if (event.target.value && index < 3) {
+            const next = document.getElementById(prefix + (index + 1));
+            if (next) next.focus();
+          }
+          // Auto-submit on last digit for login
+          if (prefix === 'login-pin-' && index === 3 && event.target.value) {
+            this.doLogin();
+          }
+        },
+
+        onPinKeydown(event, index, prefix) {
+          // Backspace on empty input → go back
+          if (event.key === 'Backspace') {
+            const arr = prefix === 'login-pin-' ? this.loginPin : this.setupPin;
+            if (!arr[index] && index > 0) {
+              const prev = document.getElementById(prefix + (index - 1));
+              if (prev) {
+                prev.focus();
+                prev.value = '';
+                if (prefix === 'login-pin-') {
+                  this.loginPin[index - 1] = '';
+                } else {
+                  this.setupPin[index - 1] = '';
+                }
+              }
+            }
+          }
+          // Enter submits
+          if (event.key === 'Enter') {
+            if (prefix === 'login-pin-') this.doLogin();
+            else this.doSetup();
+          }
+        },
+
+        async doLogin() {
+          if (this.loading) return;
+          const pin = this.loginPin.join('');
+          if (pin.length < 4) {
+            this.error = 'Please enter all 4 digits.';
+            return;
+          }
+          this.error = '';
+          this.loading = true;
+          try {
+            const res = await fetch('/api/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: this.selectedUser.id, pin }),
+            });
+            const data = await res.json();
+            if (res.ok && data.ok) {
+              window.location.href = '/dashboard.html';
+            } else {
+              this.error = 'Wrong PIN, try again.';
+              this.loginPin = ['', '', '', ''];
+              this.$nextTick(() => {
+                const el = document.getElementById('login-pin-0');
+                if (el) el.focus();
+              });
+            }
+          } catch (e) {
+            this.error = 'Network error. Please try again.';
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        async doSetup() {
+          if (this.loading) return;
+          const name = this.setupName.trim();
+          const pin = this.setupPin.join('');
+          if (!name) {
+            this.error = 'Please enter your name.';
+            return;
+          }
+          if (!/^\d{4}$/.test(pin)) {
+            this.error = 'Please enter a 4-digit PIN.';
+            return;
+          }
+          this.error = '';
+          this.loading = true;
+          try {
+            const res = await fetch('/api/auth/setup', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name, pin }),
+            });
+            const data = await res.json();
+            if (res.ok && data.ok) {
+              // Log in immediately after setup
+              const loginRes = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: data.user.id, pin }),
+              });
+              if (loginRes.ok) {
+                window.location.href = '/dashboard.html';
+              } else {
+                // Setup succeeded but login failed — show user list
+                this.users = [data.user];
+                this.mode = 'users';
+              }
+            } else {
+              this.error = data.error || 'Setup failed. Please try again.';
+            }
+          } catch (e) {
+            this.error = 'Network error. Please try again.';
+          } finally {
+            this.loading = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>
