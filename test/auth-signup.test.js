@@ -59,3 +59,13 @@ test('code is trimmed and compared exactly (case-sensitive)', () => {
   assert.strictEqual(evaluateSignup({ envCode: 'secret', providedCode: '  secret  ', name: 'Dad', pin: '1234', attempts: fresh(), now: NOW }).status, 201);
   assert.strictEqual(evaluateSignup({ envCode: 'secret', providedCode: 'SECRET', name: 'Dad', pin: '1234', attempts: fresh(), now: NOW }).status, 401);
 });
+
+test('refused until the owner account exists (usersExist=false)', () => {
+  const r = evaluateSignup({ envCode: 'secret', providedCode: 'secret', name: 'Dad', pin: '1234', attempts: fresh(), now: NOW, usersExist: false });
+  assert.strictEqual(r.status, 409);
+});
+
+test('allowed once the owner exists (usersExist=true)', () => {
+  const r = evaluateSignup({ envCode: 'secret', providedCode: 'secret', name: 'Dad', pin: '1234', attempts: fresh(), now: NOW, usersExist: true });
+  assert.strictEqual(r.status, 201);
+});

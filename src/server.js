@@ -23,18 +23,31 @@ const app = express();
 // Behind Cloudflare Tunnel / any reverse proxy — trust X-Forwarded-* headers
 app.set('trust proxy', 1);
 
+// Refuse to run in production without a real session secret — a default would
+// let anyone forge session cookies. Dev falls back with a loud warning.
+if (!process.env.SESSION_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('[FATAL] SESSION_SECRET is not set. Refusing to start in production.');
+    process.exit(1);
+  }
+  console.warn('[WARN] SESSION_SECRET not set — using an insecure dev default. Set it in .env before deploying.');
+}
+
 // Session store
 const SQLiteStore = require('connect-sqlite3')(session);
 
 app.use(session({
   store: new SQLiteStore({ db: 'sessions.db', dir: path.join(__dirname, '../data') }),
-  secret: process.env.SESSION_SECRET || 'wa-scheduler-secret',
+  secret: process.env.SESSION_SECRET || 'insecure-dev-only-secret',
   resave: false,
   saveUninitialized: false,
   cookie: {
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     httpOnly: true,
     sameSite: 'lax',
+    // 'auto' → Secure flag over HTTPS (Cloudflare tunnel), but not on the plain
+    // http LAN path, so LAN login still works. Relies on trust proxy above.
+    secure: 'auto',
   }
 }));
 
@@ -43,10 +56,6 @@ app.use(express.json());
 
 // Serve static files from src/web/
 app.use(express.static(path.join(__dirname, 'web')));
-
-if (!process.env.SESSION_SECRET) {
-  console.warn('[WARN] SESSION_SECRET not set — using default. Run `npm run share` (auto-generates one) or set it in .env.');
-}
 
 // Auth middleware — protects all /api/* except /api/auth/*
 const { authMiddleware } = require('./api/auth');
@@ -86,10 +95,11 @@ app.get(/^(?!\/api).*$/, (req, res) => {
   res.sendFile(path.join(__dirname, 'web', 'index.html'));
 });
 
-// Global error handler
+// Global error handler — log details server-side, return a generic message
+// (don't leak internals/stack/SQL to the client).
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).json({ error: 'Internal server error', message: err.message });
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 const PORT = process.env.PORT || 3000;
