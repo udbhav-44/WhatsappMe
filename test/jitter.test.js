@@ -1,7 +1,12 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { intervalSeconds, jitterMaxSeconds, jitterOffset } = require('../src/scheduler/manager');
+const { intervalSeconds, jitterMaxSeconds, jitterOffset, nextIntendedRun } = require('../src/scheduler/manager');
+
+const IST = 19800;
+const istTime = (y, mo, d, h, mi) => Math.floor(Date.UTC(y, mo, d, h, mi, 0) / 1000) - IST;
+const istHour = (t) => new Date((t + IST) * 1000).getUTCHours();
+const istDate = (t) => new Date((t + IST) * 1000).getUTCDate();
 
 // Save/restore the env var each test touches.
 function withJitter(mins, fn) {
@@ -67,5 +72,46 @@ test('jitterOffset stays within [-J, +J] and varies in sign', () => {
     }
     assert.ok(sawNeg, 'expected some negative offsets');
     assert.ok(sawPos, 'expected some positive offsets');
+  });
+});
+
+test('nextIntendedRun: no lastRun returns the next occurrence', () => {
+  withJitter('3', () => {
+    const from = istTime(2026, 6, 13, 5, 0);           // 05:00, before daily 08:00
+    const T = nextIntendedRun('0 8 * * *', from, null);
+    assert.strictEqual(istHour(T), 8);
+    assert.strictEqual(istDate(T), 13);
+  });
+});
+
+test('nextIntendedRun: skips a slot already fired early (prevents double-send)', () => {
+  withJitter('3', () => {
+    const slot = istTime(2026, 6, 13, 8, 0);           // today 08:00
+    const firedEarly = slot - 120;                     // fired at 07:58 (−2 min jitter)
+    const from = firedEarly + 60;                       // reload/restart at 07:59, before 08:00
+    const T = nextIntendedRun('0 8 * * *', from, firedEarly);
+    // must advance to TOMORROW 08:00, not re-select today's already-fired 08:00
+    assert.strictEqual(istHour(T), 8);
+    assert.strictEqual(istDate(T), 14);
+  });
+});
+
+test('nextIntendedRun: does not skip when lastRun is an old fire', () => {
+  withJitter('3', () => {
+    const from = istTime(2026, 6, 13, 5, 0);           // 05:00 today
+    const yesterday8 = istTime(2026, 6, 12, 8, 0);     // fired yesterday 08:00
+    const T = nextIntendedRun('0 8 * * *', from, yesterday8);
+    assert.strictEqual(istHour(T), 8);
+    assert.strictEqual(istDate(T), 13);                // today 08:00, not skipped
+  });
+});
+
+test('nextIntendedRun: no skip when jitter disabled (J=0)', () => {
+  withJitter(undefined, () => {
+    const slot = istTime(2026, 6, 13, 8, 0);
+    const from = istTime(2026, 6, 13, 5, 0);
+    // lastRun exactly at slot but J=0 window is zero-width; still must not skip a future slot
+    const T = nextIntendedRun('0 8 * * *', from, istTime(2026, 6, 12, 8, 0));
+    assert.strictEqual(istDate(T), 13);
   });
 });

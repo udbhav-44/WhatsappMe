@@ -96,6 +96,19 @@ function jitterOffset(cronExpr) {
   return Math.round((Math.random() * 2 - 1) * j);
 }
 
+// First intended fire at/after fromSec, skipping a slot that `lastRun` shows was
+// already fired early (within its jitter window). Used on init/reload so a
+// restart or a reload (which re-arms all of a user's schedules) during the
+// jitter window can't re-select an occurrence that already sent → no double-send.
+function nextIntendedRun(cronExpr, fromSec, lastRun) {
+  let T = nextRunFor(cronExpr, fromSec);
+  const J = jitterMaxSeconds(cronExpr);
+  if (lastRun && J > 0 && lastRun >= T - J && lastRun <= T) {
+    T = nextRunFor(cronExpr, T + 60);
+  }
+  return T;
+}
+
 function getRecipients(schedule) {
   const db = require('../db');
   if (schedule.recipient_type === 'contact') {
@@ -189,10 +202,14 @@ function clearUserTimers(userId) {
 // begins — pass now for the first arm, and (intended T + 60) after a fire so
 // the just-fired occurrence isn't re-selected (which would double-fire when
 // jitter fired us early).
-function armSchedule(schedule, fromSec) {
+function armSchedule(schedule, fromSec, reconcile = false) {
   const db = require('../db');
   const nowSec = Math.floor(Date.now() / 1000);
-  const T = nextRunFor(schedule.cron_expr, fromSec);        // intended fire time
+  // reconcile (init/reload): skip an occurrence already fired early. Post-fire
+  // re-arm passes reconcile=false and searches from the just-fired T + 60.
+  const T = reconcile
+    ? nextIntendedRun(schedule.cron_expr, fromSec, schedule.last_run)
+    : nextRunFor(schedule.cron_expr, fromSec);
   const sendAt = T + jitterOffset(schedule.cron_expr);       // jittered actual send
   const delayMs = Math.max(0, (sendAt - nowSec) * 1000);
 
@@ -205,7 +222,7 @@ function armSchedule(schedule, fromSec) {
 
   if (delayMs > MAX_TIMEOUT) {
     // Wait a chunk, then re-derive the same T and arm the remaining time.
-    rec.handle = setTimeout(() => { if (!rec.stopped) armSchedule(schedule, fromSec); }, MAX_TIMEOUT);
+    rec.handle = setTimeout(() => { if (!rec.stopped) armSchedule(schedule, fromSec, reconcile); }, MAX_TIMEOUT);
     return;
   }
 
@@ -213,7 +230,7 @@ function armSchedule(schedule, fromSec) {
     if (rec.stopped) return;
     await fireSchedule(schedule).catch(err =>
       console.error(`[Scheduler] Uncaught error in schedule ${schedule.id}:`, err.message));
-    if (!rec.stopped) armSchedule(schedule, T + 60);         // next occurrence
+    if (!rec.stopped) armSchedule(schedule, T + 60, false);  // next occurrence
   }, delayMs);
 }
 
@@ -238,7 +255,7 @@ async function init() {
       }
     }
 
-    armSchedule(schedule, Math.floor(Date.now() / 1000));
+    armSchedule(schedule, Math.floor(Date.now() / 1000), true);
   }
 
   console.log(`[Scheduler] Initialized ${schedules.length} active schedule(s)`);
@@ -257,12 +274,12 @@ async function reload(userId) {
   clearUserTimers(userId);
   const nowSec = Math.floor(Date.now() / 1000);
   for (const schedule of schedules) {
-    armSchedule(schedule, nowSec);
+    armSchedule(schedule, nowSec, true);
   }
   console.log(`[Scheduler] Reloaded ${schedules.length} active schedule(s) for user ${userId}`);
 }
 
 module.exports = {
   init, reload, matchField, nextRunFor,
-  intervalSeconds, jitterMaxSeconds, jitterOffset,
+  intervalSeconds, jitterMaxSeconds, jitterOffset, nextIntendedRun,
 };
