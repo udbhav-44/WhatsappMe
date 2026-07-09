@@ -3,9 +3,23 @@
 
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const fs = require('fs');
+const path = require('path');
 const db = require('../db');
 
 const router = express.Router();
+
+// The first account (the setup owner who sets SIGNUP_CODE) is the admin.
+const ADMIN_USER_ID = 1;
+function isAdmin(userId) { return userId === ADMIN_USER_ID; }
+
+// Pure gate for removing a user (admin-only, can't remove the owner).
+function canDeleteUser(requesterId, targetId) {
+  if (!isAdmin(requesterId)) return { status: 403, error: 'Only the owner can remove people' };
+  if (!Number.isInteger(targetId) || targetId <= 0) return { status: 400, error: 'Invalid user id' };
+  if (targetId === ADMIN_USER_ID) return { status: 400, error: "The owner account can't be removed" };
+  return { ok: true };
+}
 
 // In-memory rate limiter for login attempts
 const loginAttempts = {}; // { userId: { count, lockedUntil } }
@@ -65,10 +79,34 @@ router.get('/me', (req, res) => {
   if (req.session && req.session.userId) {
     const user = db.prepare('SELECT id, name FROM users WHERE id = ?').get(req.session.userId);
     if (user) {
-      return res.status(200).json({ id: user.id, name: user.name });
+      return res.status(200).json({ id: user.id, name: user.name, isAdmin: isAdmin(user.id) });
     }
   }
   return res.status(401).json({ error: 'Not authenticated' });
+});
+
+// DELETE /api/auth/users/:id — admin removes a user and all their data
+router.delete('/users/:id', authMiddleware, async (req, res) => {
+  const targetId = parseInt(req.params.id, 10);
+  const gate = canDeleteUser(req.session.userId, targetId);
+  if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+
+  const target = db.prepare('SELECT id FROM users WHERE id = ?').get(targetId);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+
+  // Log out + drop the WhatsApp session, then remove its files.
+  try { await require('../whatsapp/manager').stopSession(targetId); } catch (_) {}
+  try {
+    fs.rmSync(path.join(process.cwd(), 'sessions', `user-${targetId}`), { recursive: true, force: true });
+  } catch (_) {}
+
+  // FK ON DELETE CASCADE wipes their contacts, groups, templates, schedules, logs.
+  db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+
+  // Clear any timers armed for the removed user (reads 0 active schedules now).
+  try { require('../scheduler/manager').reload(targetId).catch(() => {}); } catch (_) {}
+
+  return res.json({ ok: true });
 });
 
 // GET /api/auth/users — public, returns user list for login screen
@@ -182,4 +220,4 @@ function authMiddleware(req, res, next) {
   res.status(401).json({ error: 'Not authenticated' });
 }
 
-module.exports = { router, authMiddleware, evaluateSignup };
+module.exports = { router, authMiddleware, evaluateSignup, canDeleteUser };
