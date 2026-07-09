@@ -12,6 +12,10 @@ require('./db/index');
 const waManager = require('./whatsapp/manager');
 waManager.startAllSessions().catch(console.error);
 
+// Start cron scheduler (handles missed schedules, then starts all jobs)
+const schedulerManager = require('./scheduler/manager');
+schedulerManager.init().catch(console.error);
+
 const app = express();
 
 // Session store
