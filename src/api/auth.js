@@ -104,7 +104,8 @@ router.delete('/users/:id', authMiddleware, async (req, res) => {
   db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
 
   // Clear any timers armed for the removed user (reads 0 active schedules now).
-  try { require('../scheduler/manager').reload(targetId).catch(() => {}); } catch (_) {}
+  // Awaited so cleanup completes before we respond.
+  try { await require('../scheduler/manager').reload(targetId); } catch (_) {}
 
   return res.json({ ok: true });
 });
@@ -214,9 +215,15 @@ router.post('/users', authMiddleware, async (req, res) => {
   res.status(201).json({ ok: true, user: { id: newId, name: name.trim() } });
 });
 
-// Auth middleware — applied in server.js to protect /api/* except /api/auth/*
+// Auth middleware — applied in server.js to protect /api/* except /api/auth/*.
+// Verifies the user still exists so a removed user's stale session is rejected
+// (their tab then 401s and the frontend redirects to the login screen).
 function authMiddleware(req, res, next) {
-  if (req.session && req.session.userId) return next();
+  if (req.session && req.session.userId) {
+    const u = db.prepare('SELECT id FROM users WHERE id = ?').get(req.session.userId);
+    if (u) return next();
+    return req.session.destroy(() => res.status(401).json({ error: 'Not authenticated' }));
+  }
   res.status(401).json({ error: 'Not authenticated' });
 }
 
