@@ -185,7 +185,10 @@
 
         <div class="form-group">
           <label for="c-phone">Phone Number</label>
-          <input id="c-phone" class="input" type="tel" placeholder="+91XXXXXXXXXX" x-model="form.phone">
+          <div style="display:flex;align-items:center;gap:0.5rem">
+            <span style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;padding:0.6rem 0.75rem;font-size:1rem;white-space:nowrap">+91</span>
+            <input id="c-phone" class="input" type="tel" placeholder="9876543210" x-model="form.phone" style="flex:1">
+          </div>
           <div class="error-msg" x-show="formError" x-text="formError" style="text-align:left"></div>
         </div>
 
@@ -322,8 +325,13 @@
 
         validateForm() {
           if (!this.form.name.trim()) { this.formError = 'Name is required.'; return false; }
-          if (!this.form.phone.match(/^\+\d{7,15}$/)) {
-            this.formError = 'Phone must start with + followed by digits (e.g. +91XXXXXXXXXX).';
+          // Normalize: 10-digit → prepend +91
+          let phone = this.form.phone.trim().replace(/\s+/g, '');
+          if (/^\d{10}$/.test(phone)) phone = '+91' + phone;
+          else if (/^\d{12}$/.test(phone)) phone = '+' + phone;
+          this.form.phone = phone;
+          if (!phone.match(/^\+\d{7,15}$/)) {
+            this.formError = 'Enter 10-digit number (e.g. 9876543210).';
             return false;
           }
           return true;

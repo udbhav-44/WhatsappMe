@@ -6,15 +6,18 @@ const fs = require('fs');
 const qrcode = require('qrcode');
 
 // In-memory state per user session
-// sessions[userId] = { socket: null, store: null, connected: false, qr: null, retrying: false }
 const sessions = {};
 
+// WA contacts per user — keyed by phone, persists across reconnects
+const waContacts = {};
+
 async function startSession(userId) {
-  if (sessions[userId]?.connected) return; // already connected
+  if (sessions[userId]?.connected) return;
 
-  sessions[userId] = { socket: null, store: null, connected: false, qr: null, retrying: false };
+  sessions[userId] = { socket: null, connected: false, qr: null, retrying: false };
+  if (!waContacts[userId]) waContacts[userId] = {};
 
-  const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeInMemoryStore } =
+  const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } =
     await import('@whiskeysockets/baileys');
 
   const sessionDir = path.join(process.cwd(), 'sessions', `user-${userId}`);
@@ -22,23 +25,28 @@ async function startSession(userId) {
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
 
-  const store = makeInMemoryStore({});
-
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
     logger: require('pino')({ level: 'silent' }),
   });
 
-  store.bind(sock.ev);
   sessions[userId].socket = sock;
-  sessions[userId].store = store;
 
   sock.ev.on('creds.update', saveCreds);
 
+  sock.ev.on('contacts.upsert', (contacts) => {
+    for (const c of contacts) {
+      if (!c.id || !c.id.endsWith('@s.whatsapp.net')) continue;
+      const name = c.notify || c.name || c.verifiedName || '';
+      if (!name) continue;
+      const phone = '+' + c.id.replace('@s.whatsapp.net', '');
+      waContacts[userId][phone] = { name, phone };
+    }
+  });
+
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
     if (qr) {
-      // Convert QR string to data URL for browser display
       sessions[userId].qr = await qrcode.toDataURL(qr);
       sessions[userId].connected = false;
     }
@@ -53,7 +61,6 @@ async function startSession(userId) {
       const shouldReconnect = code !== DisconnectReason.loggedOut;
       console.log(`[WA] User ${userId} disconnected (code ${code}), reconnect=${shouldReconnect}`);
       if (!shouldReconnect) {
-        // Logged out — clear stale session files so next startSession shows QR
         try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (_) {}
         console.log(`[WA] User ${userId} session cleared — open dashboard to scan QR`);
       } else if (!sessions[userId].retrying) {
@@ -61,7 +68,7 @@ async function startSession(userId) {
         setTimeout(() => {
           if (!sessions[userId]) return;
           sessions[userId].retrying = false;
-          startSession(userId); // reconnect
+          startSession(userId);
         }, 5000);
       }
     }
@@ -82,7 +89,6 @@ async function sendText(userId, phone, message) {
   const s = sessions[userId];
   if (!s?.connected || !s.socket) return false;
   try {
-    // phone: "+919876543210" → "919876543210@s.whatsapp.net"
     const jid = phone.replace(/^\+/, '') + '@s.whatsapp.net';
     await s.socket.sendMessage(jid, { text: message });
     return true;
@@ -98,7 +104,10 @@ function getStatus(userId) {
   return { connected: s.connected, qr: s.qr || undefined };
 }
 
-// Auto-start all existing users on server boot
+function getWAContacts(userId) {
+  return Object.values(waContacts[userId] || {});
+}
+
 async function startAllSessions() {
   const db = require('../db');
   const users = db.prepare('SELECT id FROM users').all();
@@ -107,18 +116,6 @@ async function startAllSessions() {
       console.error(`[WA] Failed to start session for user ${user.id}:`, err.message)
     );
   }
-}
-
-function getWAContacts(userId) {
-  const store = sessions[userId]?.store;
-  if (!store) return [];
-  return Object.values(store.contacts)
-    .filter(c => c.id && c.id.endsWith('@s.whatsapp.net'))
-    .map(c => ({
-      name: c.notify || c.name || c.verifiedName || '',
-      phone: '+' + c.id.replace('@s.whatsapp.net', ''),
-    }))
-    .filter(c => c.name); // drop nameless entries
 }
 
 module.exports = { startSession, stopSession, sendText, getStatus, startAllSessions, getWAContacts };
