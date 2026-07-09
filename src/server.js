@@ -1,6 +1,8 @@
 // src/server.js
 'use strict';
 
+require('dotenv').config();
+
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
@@ -18,6 +20,9 @@ schedulerManager.init().catch(console.error);
 
 const app = express();
 
+// Behind Cloudflare Tunnel / any reverse proxy — trust X-Forwarded-* headers
+app.set('trust proxy', 1);
+
 // Session store
 const SQLiteStore = require('connect-sqlite3')(session);
 
@@ -26,7 +31,11 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'wa-scheduler-secret',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 } // 7 days
+  cookie: {
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    httpOnly: true,
+    sameSite: 'lax',
+  }
 }));
 
 // Parse JSON bodies
@@ -36,7 +45,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'web')));
 
 if (!process.env.SESSION_SECRET) {
-  console.warn('[WARN] SESSION_SECRET not set — using default. Set it in .env for security.');
+  console.warn('[WARN] SESSION_SECRET not set — using default. Run `npm run share` (auto-generates one) or set it in .env.');
 }
 
 // Auth middleware — protects all /api/* except /api/auth/*
