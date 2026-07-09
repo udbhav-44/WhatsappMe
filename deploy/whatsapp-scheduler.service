@@ -1,0 +1,19 @@
+[Unit]
+Description=WhatsApp Scheduler (Ping)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Replace USERNAME with your Linux user (e.g. the default GCP user)
+User=USERNAME
+WorkingDirectory=/home/USERNAME/WhatsappMe
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=3000
+# SESSION_SECRET is read from the .env file in WorkingDirectory (via dotenv)
+
+[Install]
+WantedBy=multi-user.target

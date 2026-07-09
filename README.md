@@ -32,7 +32,12 @@ The free `trycloudflare.com` URL changes every restart. For a URL that never
 changes, create a named tunnel with a Cloudflare account + domain:
 https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
 
-## Autostart (runs on login)
+## Always-on hosting (free)
+
+To run 24/7 without your own computer, deploy to a free Google Cloud VM.
+Step-by-step guide: [deploy/DEPLOY-GCP.md](deploy/DEPLOY-GCP.md).
+
+## Autostart on your own computer (runs on login)
 
 ```
 npm run setup-autostart
