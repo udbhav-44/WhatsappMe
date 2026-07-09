@@ -9,66 +9,124 @@ const router = express.Router();
 // Cron helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ── window + day-of-week helpers ────────────────────────────────────────────
+function windowHourField(start, end) {
+  if (start === 0 && end === 23) return '*';
+  if (start === end) return String(start);
+  return `${start}-${end}`;
+}
+
+function dowField(days) {
+  if (!days || days.length === 0) return '*';
+  return [...days].map(Number).sort((a, b) => a - b).join(',');
+}
+
+function parseWindow(hourField) {
+  if (hourField === '*') return { windowStart: 0, windowEnd: 23 };
+  if (hourField.includes('-')) {
+    const [s, e] = hourField.split('-').map(Number);
+    return { windowStart: s, windowEnd: e };
+  }
+  const h = Number(hourField);
+  return { windowStart: h, windowEnd: h };
+}
+
+function parseDow(field) {
+  if (!field || field === '*') return [];
+  const out = [];
+  for (const part of field.split(',')) {
+    if (part.includes('-')) {
+      const [a, b] = part.split('-').map(Number);
+      for (let i = a; i <= b; i++) out.push(i);
+    } else {
+      out.push(Number(part));
+    }
+  }
+  return out;
+}
+
+// ── cron encode ─────────────────────────────────────────────────────────────
 function toCron(schedule) {
-  const { scheduleType, timeHour, timeMinute, days, intervalValue, intervalUnit } = schedule;
+  const {
+    scheduleType, timeHour, timeMinute, days,
+    intervalValue, intervalUnit, windowStart, windowEnd,
+  } = schedule;
+
   if (scheduleType === 'daily') {
     return `${timeMinute} ${timeHour} * * *`;
   }
   if (scheduleType === 'weekly') {
-    const dayList = [...days].sort().join(',');
-    return `${timeMinute} ${timeHour} * * ${dayList}`;
+    return `${timeMinute} ${timeHour} * * ${dowField(days)}`;
   }
   if (scheduleType === 'interval') {
-    if (intervalUnit === 'hours') return `0 */${intervalValue} * * *`;
-    if (intervalUnit === 'days') return `0 0 */${intervalValue} * *`;
+    const ws = windowStart === undefined ? 0 : windowStart;
+    const we = windowEnd === undefined ? 23 : windowEnd;
+    if (intervalUnit === 'minutes') {
+      return `*/${intervalValue} ${windowHourField(ws, we)} * * ${dowField(days)}`;
+    }
+    if (intervalUnit === 'hours') {
+      const hf = windowHourField(ws, we);
+      const stepField = hf === '*' ? `*/${intervalValue}` : `${hf}/${intervalValue}`;
+      return `0 ${stepField} * * ${dowField(days)}`;
+    }
+    if (intervalUnit === 'days') {
+      return `0 0 */${intervalValue} * *`;
+    }
   }
   throw new Error('Invalid scheduleType');
 }
 
+// ── cron classify ───────────────────────────────────────────────────────────
 function detectScheduleType(cronExpr) {
   const parts = cronExpr.split(' ');
-  // Check interval first (must come before daily/weekly checks)
-  if (parts[2] && parts[2].startsWith('*/')) return 'interval'; // */D days
-  if (parts[1] && parts[1].startsWith('*/')) return 'interval'; // */H hours
+  const [min, hour, dom] = parts;
+  // interval markers must be checked before weekly: a minute/hour interval
+  // may carry a day-of-week list that would otherwise look weekly.
+  if (min.startsWith('*/') || hour.includes('/') || dom.startsWith('*/')) return 'interval';
   if (parts[4] && parts[4] !== '*') return 'weekly';
-  if (parts[1] && parts[1] !== '*') return 'daily';
+  if (hour && hour !== '*') return 'daily';
   return 'interval';
 }
 
+// ── cron decode ─────────────────────────────────────────────────────────────
 function fromCron(cronExpr, scheduleType) {
   const parts = cronExpr.split(' ');
   if (scheduleType === 'daily') {
-    return {
-      scheduleType: 'daily',
-      timeMinute: Number(parts[0]),
-      timeHour: Number(parts[1]),
-    };
+    return { scheduleType: 'daily', timeMinute: Number(parts[0]), timeHour: Number(parts[1]) };
   }
   if (scheduleType === 'weekly') {
     return {
       scheduleType: 'weekly',
       timeMinute: Number(parts[0]),
       timeHour: Number(parts[1]),
-      days: parts[4].split(',').map(Number),
+      days: parseDow(parts[4]),
     };
   }
   if (scheduleType === 'interval') {
-    if (parts[1].startsWith('*/')) {
+    const [min, hour, dom] = parts;
+    if (min.startsWith('*/')) {
+      const w = parseWindow(hour);
       return {
-        scheduleType: 'interval',
-        intervalValue: Number(parts[1].slice(2)),
-        intervalUnit: 'hours',
+        scheduleType: 'interval', intervalUnit: 'minutes', intervalValue: Number(min.slice(2)),
+        windowStart: w.windowStart, windowEnd: w.windowEnd, days: parseDow(parts[4]),
       };
     }
-    if (parts[2].startsWith('*/')) {
+    if (hour.includes('/')) {
+      const [range, step] = hour.split('/');
+      const w = parseWindow(range);
       return {
-        scheduleType: 'interval',
-        intervalValue: Number(parts[2].slice(2)),
-        intervalUnit: 'days',
+        scheduleType: 'interval', intervalUnit: 'hours', intervalValue: Number(step),
+        windowStart: w.windowStart, windowEnd: w.windowEnd, days: parseDow(parts[4]),
+      };
+    }
+    if (dom.startsWith('*/')) {
+      return {
+        scheduleType: 'interval', intervalUnit: 'days', intervalValue: Number(dom.slice(2)),
+        windowStart: 0, windowEnd: 23, days: [],
       };
     }
   }
-  return { scheduleType, intervalValue: 1, intervalUnit: 'hours' };
+  return { scheduleType, intervalValue: 1, intervalUnit: 'hours', windowStart: 0, windowEnd: 23, days: [] };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -289,4 +347,4 @@ router.patch('/schedules/:id/toggle', (req, res) => {
   return res.json(schedule);
 });
 
-module.exports = { router, toCron, fromCron };
+module.exports = { router, toCron, fromCron, detectScheduleType };
