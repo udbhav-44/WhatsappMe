@@ -1,0 +1,25 @@
+{
+  "name": "whatsappreminder",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "setup-autostart": "node scripts/setup-autostart.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc13",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.11.1",
+    "connect-sqlite3": "^0.9.16",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "node-cron": "^4.6.0",
+    "qrcode": "^1.5.4"
+  }
+}
