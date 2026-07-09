@@ -45,17 +45,18 @@ async function startSession(userId) {
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('contacts.upsert', (contacts) => {
-    let changed = false;
+    let added = 0;
     for (const c of contacts) {
       if (!c.id || !c.id.endsWith('@s.whatsapp.net')) continue;
       const name = c.notify || c.name || c.verifiedName || '';
       if (!name) continue;
       const phone = '+' + c.id.replace('@s.whatsapp.net', '');
       waContacts[userId][phone] = { name, phone };
-      changed = true;
+      added++;
     }
-    // Persist to disk so contacts survive server restarts
-    if (changed) {
+    if (added > 0) {
+      const total = Object.keys(waContacts[userId]).length;
+      console.log(`[WA] User ${userId}: contacts.upsert +${added} (total: ${total})`);
       try { fs.writeFileSync(contactsCachePath, JSON.stringify(waContacts[userId])); } catch (_) {}
     }
   });
@@ -128,6 +129,28 @@ function getWAContacts(userId) {
   return Object.values(waContacts[userId] || {});
 }
 
+async function syncContacts(userId) {
+  const s = sessions[userId];
+  if (!s?.socket || !s.connected) {
+    console.log(`[WA] syncContacts: user ${userId} not connected`);
+    return;
+  }
+  try {
+    console.log(`[WA] User ${userId}: forcing contact re-sync`);
+    const appStates = ['regular', 'regular_high', 'regular_low', 'critical_block', 'critical_unblock_low'];
+    // Mark dirty so resync downloads fresh data
+    if (typeof s.socket.cleanDirtyBits === 'function') {
+      await Promise.all(appStates.map(a => s.socket.cleanDirtyBits(a).catch(() => {})));
+    }
+    if (typeof s.socket.resyncAppState === 'function') {
+      await s.socket.resyncAppState(appStates);
+    }
+    console.log(`[WA] User ${userId}: contact sync triggered, contacts so far: ${Object.keys(waContacts[userId] || {}).length}`);
+  } catch (err) {
+    console.error(`[WA] syncContacts error for user ${userId}:`, err.message);
+  }
+}
+
 async function startAllSessions() {
   const db = require('../db');
   const users = db.prepare('SELECT id FROM users').all();
@@ -138,4 +161,4 @@ async function startAllSessions() {
   }
 }
 
-module.exports = { startSession, stopSession, sendText, getStatus, startAllSessions, getWAContacts };
+module.exports = { startSession, stopSession, sendText, getStatus, startAllSessions, getWAContacts, syncContacts };

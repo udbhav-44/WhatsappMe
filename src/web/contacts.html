@@ -209,7 +209,10 @@
           <div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
             <template x-if="importContacts.length === 0">
               <div style="padding:1rem;color:#666">
-                No new contacts to import. Either WhatsApp hasn't synced yet (connect first) or all contacts are already saved.
+                <p>No contacts loaded yet. WhatsApp syncs contacts on first QR scan. Click below to force a re-sync:</p>
+                <button class="btn" style="margin-top:0.75rem" @click="forceSyncContacts()" :disabled="importSyncing">
+                  <span x-text="importSyncing ? 'Syncing… (wait 5s)' : '🔄 Force Sync Contacts'"></span>
+                </button>
               </div>
             </template>
             <template x-if="importContacts.length > 0">
@@ -268,6 +271,7 @@
         importLoading: false,
         importStatus: '',
         importSearch: '',
+        importSyncing: false,
         newGroupName: '',
         expandedGroup: null,
         addMemberContactId: '',
@@ -461,6 +465,24 @@
           this.importStatus = '';
           const existing = new Set(this.contacts.map(c => c.phone));
           this.importContacts = all.filter(c => !existing.has(c.phone));
+        },
+
+        async forceSyncContacts() {
+          this.importSyncing = true;
+          await this.apiFetch('/api/whatsapp/sync-contacts', { method: 'POST' });
+          // Wait for Baileys to process the sync (5-10s)
+          for (let i = 0; i < 8; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            const res = await this.apiFetch('/api/whatsapp/contacts');
+            if (!res) break;
+            const all = await res.json();
+            if (all.length > 0) {
+              const existing = new Set(this.contacts.map(c => c.phone));
+              this.importContacts = all.filter(c => !existing.has(c.phone));
+              break;
+            }
+          }
+          this.importSyncing = false;
         },
 
         toggleImportAll() {

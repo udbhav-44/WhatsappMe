@@ -36,4 +36,11 @@ router.get('/contacts', (req, res) => {
   res.json(contacts);
 });
 
+// POST /api/whatsapp/sync-contacts
+// Forces a fresh app-state re-sync to trigger contacts.upsert
+router.post('/sync-contacts', async (req, res) => {
+  await waManager.syncContacts(req.session.userId);
+  res.json({ ok: true });
+});
+
 module.exports = router;

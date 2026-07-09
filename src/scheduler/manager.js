@@ -36,6 +36,8 @@ async function fireSchedule(schedule) {
     try {
       const message = render(template ? template.body : '', contact);
       const ok = await waManager.sendText(schedule.user_id, contact.phone, message);
+      const status = ok ? 'sent' : 'failed';
+      console.log(`[Scheduler] Schedule "${schedule.name}" (id:${schedule.id}) → ${contact.name} ${contact.phone}: ${status}`);
       db.prepare(`
         INSERT INTO logs (user_id, schedule_id, contact_id, phone, message_body, sent_at, status)
         VALUES (?, ?, ?, ?, ?, unixepoch(), ?)
@@ -45,7 +47,7 @@ async function fireSchedule(schedule) {
         contact.id,
         contact.phone,
         message,
-        ok ? 'sent' : 'failed'
+        status
       );
     } catch (err) {
       console.error(`[Scheduler] Error firing schedule ${schedule.id} for contact ${contact.id}:`, err.message);
